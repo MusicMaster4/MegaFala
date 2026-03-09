@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR" data-theme="dark">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -18,40 +18,38 @@
           <img class="brand-block__icon" src="../assets/megaf.ico" alt="MegaFala" />
           <div>
             <h1>MegaFala</h1>
-            <p class="topbar__copy">
-              Escreva na velocidade do pensamento.
-            </p>
+            <p class="topbar__copy" data-i18n="appTagline">Write at the speed of thought.</p>
           </div>
         </div>
         <div class="topbar__meta">
           <div class="shortcut-meta">
-            <span>Atalho global</span>
+            <span data-i18n="globalShortcut">Global shortcut</span>
             <strong id="shortcut-label">Ctrl+Win</strong>
           </div>
-          <button class="secondary-button" id="open-dictionary" type="button">
-            Dicion&aacute;rio
+          <button class="secondary-button" id="open-dictionary" type="button" data-i18n="dictionary">
+            Dictionary
           </button>
-          <button class="settings-button" id="open-settings" type="button">
-            Configurações
+          <button class="settings-button" id="open-settings" type="button" data-i18n="settings">
+            Settings
           </button>
         </div>
       </header>
 
       <section class="metrics-row">
         <div class="metric-card">
-          <span class="metric-card__label">Sequência</span>
-          <strong id="streak-value">0 dias</strong>
+          <span class="metric-card__label" data-i18n="streak">Streak</span>
+          <strong id="streak-value">0 days</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-card__label">Dias de uso</span>
-          <strong id="days-used-value">0 dias</strong>
+          <span class="metric-card__label" data-i18n="daysUsed">Days used</span>
+          <strong id="days-used-value">0 days</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-card__label">Palavras faladas</span>
-          <strong id="words-total-value">0</strong>
+          <span class="metric-card__label" data-i18n="wordsSpoken">Words spoken</span>
+          <strong id="words-total-value">0 words</strong>
         </div>
         <div class="metric-card">
-          <span class="metric-card__label">Média WPM</span>
+          <span class="metric-card__label" data-i18n="averageWpm">Average WPM</span>
           <strong id="wpm-value">0 WPM</strong>
         </div>
       </section>
@@ -61,28 +59,29 @@
           <article class="transcripts-panel">
             <div class="section-head">
               <div>
-                <h2>Últimas transcrições</h2>
-                <p class="section-head__copy">
-                  Histórico local das últimas 100 mensagens.
+                <h2 data-i18n="latestTranscriptions">Latest transcriptions</h2>
+                <p class="section-head__copy" data-i18n="historyCopy">
+                  Local history for the latest 100 messages.
                 </p>
               </div>
-              <span class="section-count" id="history-count">0 mensagens</span>
+              <span class="section-count" id="history-count">0 messages</span>
             </div>
 
             <div class="history-toolbar">
               <label class="search-field" for="history-search">
-                <span>Pesquisar</span>
+                <span data-i18n="search">Search</span>
                 <input
                   id="history-search"
                   type="search"
-                  placeholder="Buscar palavras nas transcrições..."
                   autocomplete="off"
+                  data-i18n-placeholder="historySearchPlaceholder"
+                  placeholder="Search words in transcriptions..."
                 />
               </label>
             </div>
 
             <div class="history-list" id="history-list">
-              <div class="history-empty">Nenhuma transcrição ainda.</div>
+              <div class="history-empty" data-i18n="noTranscriptions">No transcriptions yet.</div>
             </div>
           </article>
         </div>
@@ -101,13 +100,13 @@
       >
         <div class="settings-drawer__header">
           <div>
-            <h2 id="settings-title">Configurações</h2>
-            <p class="section-head__copy">
-              Ajustes de aparência, idiomas e modelo de IA.
+            <h2 id="settings-title" data-i18n="settings">Settings</h2>
+            <p class="section-head__copy" data-i18n="settingsCopy">
+              Appearance, language, and AI model preferences.
             </p>
           </div>
-          <button class="secondary-button" id="close-settings" type="button">
-            Fechar
+          <button class="secondary-button" id="close-settings" type="button" data-i18n="close">
+            Close
           </button>
         </div>
 
@@ -115,17 +114,39 @@
           <div class="panel--settings">
             <div class="section-head">
               <div>
-                <h2>Aparência</h2>
+                <h2 data-i18n="interfaceLanguage">Interface language</h2>
+                <p class="section-head__copy" data-i18n="interfaceLanguageCopy">
+                  Search and switch the app language instantly. The app defaults to English.
+                </p>
+              </div>
+            </div>
+            <label class="search-field search-field--settings" for="interface-language-search">
+              <span data-i18n="searchLanguage">Search language</span>
+              <input
+                id="interface-language-search"
+                type="search"
+                autocomplete="off"
+                data-i18n-placeholder="languageSearchPlaceholder"
+                placeholder="Search your language..."
+              />
+            </label>
+            <div class="interface-language-list" id="interface-language-list"></div>
+          </div>
+
+          <div class="panel--settings">
+            <div class="section-head">
+              <div>
+                <h2 data-i18n="appearance">Appearance</h2>
               </div>
             </div>
             <div class="language-grid">
               <label class="language-option">
                 <input type="radio" name="theme" value="dark" checked />
-                <span>Modo Escuro</span>
+                <span data-i18n="darkMode">Dark mode</span>
               </label>
               <label class="language-option">
                 <input type="radio" name="theme" value="light" />
-                <span>Modo Claro</span>
+                <span data-i18n="lightMode">Light mode</span>
               </label>
             </div>
           </div>
@@ -133,14 +154,14 @@
           <div class="panel--settings">
             <div class="section-head">
               <div>
-                <h2>Barra Flutuante</h2>
+                <h2 data-i18n="floatingBar">Floating bar</h2>
               </div>
             </div>
             <label class="toggle-card" for="show-overlay-bar">
               <div>
-                <strong>Exibir overlay global</strong>
-                <p>
-                  Mostra o indicador visual de gravação acima de qualquer app.
+                <strong data-i18n="showOverlay">Show global overlay</strong>
+                <p data-i18n="showOverlayCopy">
+                  Display the recording indicator above any app.
                 </p>
               </div>
               <span class="toggle-switch">
@@ -150,9 +171,9 @@
             </label>
             <label class="toggle-card" for="sound-effects-enabled">
               <div>
-                <strong>Sons de feedback</strong>
-                <p>
-                  Toca avisos sonoros ao carregar, iniciar, encerrar, cancelar e ativar hands-free.
+                <strong data-i18n="soundEffects">Sound feedback</strong>
+                <p data-i18n="soundEffectsCopy">
+                  Play sounds on load, start, stop, cancel, and hands-free activation.
                 </p>
               </div>
               <span class="toggle-switch">
@@ -165,17 +186,17 @@
           <div class="panel--settings">
             <div class="section-head">
               <div>
-                <h2>Idiomas de Detecção</h2>
+                <h2 data-i18n="detectionLanguages">Detection languages</h2>
               </div>
             </div>
             <div class="language-grid">
               <label class="language-option">
                 <input id="lang-pt" type="checkbox" value="pt" />
-                <span>Português</span>
+                <span id="lang-pt-label">Português</span>
               </label>
               <label class="language-option">
                 <input id="lang-en" type="checkbox" value="en" />
-                <span>English</span>
+                <span id="lang-en-label">English</span>
               </label>
             </div>
           </div>
@@ -183,10 +204,10 @@
           <div class="panel--settings">
             <div class="section-head">
               <div>
-                <h2>Modelos de Transcrição</h2>
+                <h2 data-i18n="transcriptionModels">Transcription models</h2>
               </div>
-              <button class="secondary-button" id="reset-stats" type="button">
-                Resetar Média
+              <button class="secondary-button" id="reset-stats" type="button" data-i18n="resetAverage">
+                Reset average
               </button>
             </div>
             <div class="model-list" id="model-list"></div>
@@ -195,21 +216,21 @@
           <div class="panel--settings">
             <div class="section-head">
               <div>
-                <h2>Diagnóstico do Sistema</h2>
+                <h2 data-i18n="systemDiagnostics">System diagnostics</h2>
               </div>
             </div>
             <dl class="status-facts">
               <div class="status-facts__item">
-                <dt>Modelo ativo</dt>
+                <dt data-i18n="activeModel">Active model</dt>
                 <dd id="active-model-label">--</dd>
               </div>
               <div class="status-facts__item">
-                <dt>Processamento</dt>
+                <dt data-i18n="processing">Processing</dt>
                 <dd id="device-label">--</dd>
               </div>
               <div class="status-facts__item">
-                <dt>Backend</dt>
-                <dd id="device-note">Sem observações.</dd>
+                <dt data-i18n="backend">Backend</dt>
+                <dd id="device-note">No notes.</dd>
               </div>
             </dl>
           </div>
@@ -225,13 +246,13 @@
       >
         <div class="dialog-window__header">
           <div>
-            <h2 id="dictionary-title">Dicion&aacute;rio</h2>
-            <p class="section-head__copy">
-              Troque termos automaticamente no texto final.
+            <h2 id="dictionary-title" data-i18n="dictionary">Dictionary</h2>
+            <p class="section-head__copy" data-i18n="dictionaryCopy">
+              Replace terms automatically in the final text.
             </p>
           </div>
-          <button class="secondary-button" id="close-dictionary" type="button">
-            Fechar
+          <button class="secondary-button" id="close-dictionary" type="button" data-i18n="close">
+            Close
           </button>
         </div>
 
@@ -239,49 +260,51 @@
           <form class="dictionary-form" id="dictionary-form">
             <div class="dictionary-form__grid">
               <label class="form-field" for="dictionary-sources">
-                <span>Entradas da regra</span>
+                <span data-i18n="dictionarySources">Rule inputs</span>
                 <textarea
                   id="dictionary-sources"
                   rows="4"
-                  placeholder="Uma varia&ccedil;&atilde;o por linha&#10;mega fala&#10;megafala"
+                  data-i18n-placeholder="dictionarySourcesPlaceholder"
+                  placeholder="One variation per line&#10;mega fala&#10;megafala"
                 ></textarea>
-                <p class="form-hint">
-                  Adicione quantas varia&ccedil;&otilde;es quiser. Use uma entrada por linha.
+                <p class="form-hint" data-i18n="dictionarySourcesHint">
+                  Add as many variations as needed. Use one entry per line.
                 </p>
               </label>
 
               <label class="form-field" for="dictionary-target">
-                <span>Substitui&ccedil;&atilde;o final</span>
+                <span data-i18n="dictionaryTarget">Final replacement</span>
                 <input
                   id="dictionary-target"
                   type="text"
-                  placeholder="Ex.: MegaFala"
                   autocomplete="off"
+                  data-i18n-placeholder="dictionaryTargetPlaceholder"
+                  placeholder="Example: MegaFala"
                 />
               </label>
             </div>
 
             <div class="dictionary-form__footer">
               <div class="dictionary-form__options">
-                <span class="form-field__label">L&iacute;nguas ativas</span>
+                <span class="form-field__label" data-i18n="activeLanguages">Active languages</span>
                 <div class="language-grid language-grid--dictionary">
                   <label class="language-option">
                     <input id="dictionary-lang-pt" type="checkbox" value="pt" />
-                    <span>Portugu&ecirc;s</span>
+                    <span id="dictionary-lang-pt-label">Português</span>
                   </label>
                   <label class="language-option">
                     <input id="dictionary-lang-en" type="checkbox" value="en" />
-                    <span>English</span>
+                    <span id="dictionary-lang-en-label">English</span>
                   </label>
                 </div>
               </div>
 
               <div class="dictionary-form__actions">
-                <button class="secondary-button hidden" id="cancel-dictionary-edit" type="button">
-                  Cancelar edi&ccedil;&atilde;o
+                <button class="secondary-button hidden" id="cancel-dictionary-edit" type="button" data-i18n="cancelEditing">
+                  Cancel editing
                 </button>
-                <button class="settings-button" id="submit-dictionary-rule" type="submit">
-                  Adicionar regra
+                <button class="settings-button" id="submit-dictionary-rule" type="submit" data-i18n="addRule">
+                  Add rule
                 </button>
               </div>
             </div>
@@ -290,16 +313,36 @@
           <section class="dictionary-section">
             <div class="section-head section-head--tight">
               <div>
-                <h2>Regras ativas</h2>
-                <p class="section-head__copy">
-                  A substitui&ccedil;&atilde;o acontece antes do texto entrar no hist&oacute;rico e no campo ativo.
-                </p>
+                <h2 data-i18n="activeRules">Active rules</h2>
               </div>
-              <span class="section-count" id="dictionary-count">0 regras</span>
+              <div class="dictionary-section__head-actions">
+                <span class="section-count" id="dictionary-count">0 rules</span>
+                <button
+                  class="secondary-button dictionary-section__toggle"
+                  id="toggle-dictionary-rules"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="dictionary-rules-body"
+                >
+                  Mostrar regras
+                </button>
+              </div>
             </div>
 
-            <div class="dictionary-list" id="dictionary-list">
-              <div class="history-empty">Nenhuma regra cadastrada.</div>
+            <div class="dictionary-section__body hidden" id="dictionary-rules-body">
+              <label class="dictionary-search" for="dictionary-search">
+                <span class="dictionary-search__label">Pesquisar regra ativa</span>
+                <input
+                  id="dictionary-search"
+                  type="search"
+                  placeholder="Digite uma palavra da entrada ou da saída"
+                  autocomplete="off"
+                />
+              </label>
+
+              <div class="dictionary-list" id="dictionary-list">
+                <div class="history-empty" data-i18n="noRules">No rules yet.</div>
+              </div>
             </div>
           </section>
         </div>

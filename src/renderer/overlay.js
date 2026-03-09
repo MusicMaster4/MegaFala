@@ -5,6 +5,7 @@ const overlayEls = {
   wave: document.getElementById('overlay-wave'),
   loader: document.getElementById('overlay-loader'),
   readySequence: document.getElementById('overlay-ready-sequence'),
+  readyLabel: document.getElementById('overlay-ready-label'),
   glyph: document.getElementById('overlay-glyph'),
 };
 
@@ -25,6 +26,24 @@ let feedbackTimer = null;
 let activeFeedback = null;
 let activeSoundKey = null;
 let soundDrainScheduled = false;
+
+const overlayReadyLabels = {
+  en: 'READY',
+  'pt-BR': 'PRONTO',
+  es: 'LISTO',
+  fr: 'PRET',
+  de: 'BEREIT',
+  it: 'PRONTO',
+  nl: 'KLAAR',
+  el: 'ETOIMO',
+  ru: 'GOTOVO',
+  'zh-CN': '就绪',
+  ja: '準備完了',
+  ko: '준비됨',
+  ar: 'جاهز',
+  hi: 'तैयार',
+  tr: 'HAZIR',
+};
 
 const feedbackSounds = {
   loaded: new Audio('../assets/audio/loaded.mp3'),
@@ -358,6 +377,11 @@ function initTheme() {
     if (document.documentElement.getAttribute('data-theme') !== savedTheme) {
       document.documentElement.setAttribute('data-theme', savedTheme);
     }
+
+    const savedLanguage = localStorage.getItem('megafala-interface-language') || 'en';
+    document.documentElement.lang = savedLanguage;
+    document.documentElement.dir = savedLanguage === 'ar' ? 'rtl' : 'ltr';
+    overlayEls.readyLabel.textContent = overlayReadyLabels[savedLanguage] || overlayReadyLabels.en;
   };
   syncTheme();
   window.addEventListener('storage', syncTheme);

@@ -8,17 +8,16 @@ const readline = require('readline');
 
 const DEFAULT_SHORTCUT = 'ctrl+windows';
 const DEFAULT_LANGUAGES = ['pt', 'en'];
+const DEFAULT_INTERFACE_LANGUAGE = 'en';
 const DEFAULT_SHOW_OVERLAY_BAR = true;
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
-const PERSISTENCE_VERSION = 3;
+const PERSISTENCE_VERSION = 4;
 const SERVICE_SHUTDOWN_TIMEOUT_MS = 2500;
 const OVERLAY_WIDTH = 96;
 const OVERLAY_HEIGHT = 34;
 const OVERLAY_MARGIN_BOTTOM = 22;
 const APP_NAME = 'MegaFala';
 const APP_ID = 'com.megafala.app';
-const HANDS_FREE_ACTIVE_NOTICE =
-  'Modo hands-free ativo. Pressione Ctrl + Win para finalizar e transcrever.';
 const MODEL_OPTIONS = [
   {
     id: 'tiny',
@@ -46,6 +45,64 @@ const MODEL_OPTIONS = [
     description: 'Maior precisao, custo local mais alto.',
   },
 ];
+
+const SUPPORTED_INTERFACE_LANGUAGES = [
+  'en',
+  'pt-BR',
+  'es',
+  'fr',
+  'de',
+  'it',
+  'nl',
+  'el',
+  'ru',
+  'zh-CN',
+  'ja',
+  'ko',
+  'ar',
+  'hi',
+  'tr',
+];
+
+const MAIN_TRANSLATIONS = {
+  en: {
+    activeLanguages: 'Active detection languages: {languages}.',
+    switchingModel: 'Switching to {model}...',
+    overlayOn: 'Floating bar enabled.',
+    overlayOff: 'Floating bar disabled.',
+    soundOn: 'Sound feedback enabled.',
+    soundOff: 'Sound feedback disabled.',
+    dictionaryOn: 'Dictionary active with {count} rule(s).',
+    dictionaryOff: 'Dictionary cleared.',
+    modelStatsReset: 'Model stats reset.',
+    interfaceLanguageChanged: 'Interface language: {language}.',
+    handsFreeActive: 'Hands-free mode active. Press Ctrl + Win to finish and transcribe.',
+    waitingSwitchHandsFree:
+      'Switching to {model}. Hands-free mode will start when the new worker is ready.',
+    waitingSwitchHold: 'Switching to {model}. Wait for the new worker to finish loading.',
+    waitingBootHandsFree: 'The model is still loading. Hands-free mode will start when it is ready.',
+    waitingBootHold: 'The model is still loading. Wait a few seconds.',
+  },
+  'pt-BR': {
+    activeLanguages: 'Idiomas de deteccao ativos: {languages}.',
+    switchingModel: 'Trocando para {model}...',
+    overlayOn: 'Barra flutuante ativada.',
+    overlayOff: 'Barra flutuante desativada.',
+    soundOn: 'Feedback sonoro ativado.',
+    soundOff: 'Feedback sonoro desativado.',
+    dictionaryOn: 'Dicionario ativo com {count} regra(s).',
+    dictionaryOff: 'Dicionario limpo.',
+    modelStatsReset: 'Estatisticas de modelos resetadas.',
+    interfaceLanguageChanged: 'Idioma da interface: {language}.',
+    handsFreeActive: 'Modo hands-free ativo. Pressione Ctrl + Win para finalizar e transcrever.',
+    waitingSwitchHandsFree:
+      'Trocando para {model}. O modo hands-free sera ativado quando o novo worker ficar pronto.',
+    waitingSwitchHold: 'Trocando para {model}. Aguarde o novo worker ficar pronto.',
+    waitingBootHandsFree:
+      'O modelo ainda esta carregando. O modo hands-free sera iniciado quando estiver pronto.',
+    waitingBootHold: 'O modelo ainda esta carregando. Aguarde alguns segundos.',
+  },
+};
 
 let mainWindow = null;
 let overlayWindow = null;
@@ -81,6 +138,33 @@ function normalizeLanguages(input) {
   return languages.length > 0 ? [...new Set(languages)] : [...DEFAULT_LANGUAGES];
 }
 
+function normalizeInterfaceLanguage(input) {
+  const value = String(input || '').trim();
+  return SUPPORTED_INTERFACE_LANGUAGES.includes(value) ? value : DEFAULT_INTERFACE_LANGUAGE;
+}
+
+function getTranslationBundle(language) {
+  return MAIN_TRANSLATIONS[normalizeInterfaceLanguage(language)] || MAIN_TRANSLATIONS.en;
+}
+
+function translateMain(key, params = {}, language = state.interfaceLanguage) {
+  const template =
+    getTranslationBundle(language)[key] || MAIN_TRANSLATIONS.en[key] || String(key || '');
+
+  return template.replace(/\{(\w+)\}/g, (_match, token) => String(params[token] ?? ''));
+}
+
+function getLocalizedLanguageName(code, language = state.interfaceLanguage) {
+  const normalizedCode = normalizeInterfaceLanguage(code);
+  const normalizedLanguage = normalizeInterfaceLanguage(language);
+
+  try {
+    return new Intl.DisplayNames([normalizedLanguage], { type: 'language' }).of(normalizedCode);
+  } catch (_error) {
+    return normalizedCode;
+  }
+}
+
 function normalizeModel(modelId) {
   const value = String(modelId || '').trim();
   return MODEL_OPTIONS.some((option) => option.id === value) ? value : getDefaultModel();
@@ -94,8 +178,25 @@ function getModelOption(modelId) {
   return MODEL_OPTIONS.find((option) => option.id === modelId) || null;
 }
 
-function getModelDisplayName(modelId) {
-  return getModelOption(modelId)?.label || modelId || 'modelo';
+function getModelDisplayName(modelId, language = state.interfaceLanguage) {
+  const option = getModelOption(modelId);
+  if (!option) {
+    return modelId || 'model';
+  }
+
+  if (normalizeInterfaceLanguage(language) === 'pt-BR') {
+    return option.label || modelId || 'modelo';
+  }
+
+  const labels = {
+    tiny: 'Lite',
+    base: 'Fast',
+    small: 'Balanced',
+    medium: 'Precise',
+    'large-v3': 'Maximum',
+  };
+
+  return labels[option.id] || option.label || modelId || 'model';
 }
 
 function createEmptyStats() {
@@ -389,6 +490,7 @@ function getDefaultsFromEnv() {
   return {
     shortcut: String(process.env.FLOW_HOTKEY || DEFAULT_SHORTCUT).toLowerCase(),
     allowedLanguages: normalizeLanguages(process.env.ALLOWED_LANGUAGES || DEFAULT_LANGUAGES.join(',')),
+    interfaceLanguage: normalizeInterfaceLanguage(process.env.INTERFACE_LANGUAGE),
     model: normalizeModel(getDefaultModel()),
     showOverlayBar: DEFAULT_SHOW_OVERLAY_BAR,
     soundEffectsEnabled: DEFAULT_SOUND_EFFECTS_ENABLED,
@@ -408,6 +510,7 @@ const state = {
   partial: '',
   latestFinal: '',
   latestLanguage: null,
+  interfaceLanguage: defaults.interfaceLanguage,
   model: defaults.model,
   availableModels: MODEL_OPTIONS,
   modelStats: createEmptyStats(),
@@ -466,6 +569,7 @@ function createEmptyPersistedState() {
     version: PERSISTENCE_VERSION,
     preferences: {
       allowedLanguages: defaults.allowedLanguages,
+      interfaceLanguage: defaults.interfaceLanguage,
       model: defaults.model,
       showOverlayBar: defaults.showOverlayBar,
       soundEffectsEnabled: defaults.soundEffectsEnabled,
@@ -496,6 +600,7 @@ function normalizePersistedState(payload) {
     version: PERSISTENCE_VERSION,
     preferences: {
       allowedLanguages: normalizeLanguages(preferencesSource.allowedLanguages),
+      interfaceLanguage: normalizeInterfaceLanguage(preferencesSource.interfaceLanguage),
       model: normalizeModel(preferencesSource.model),
       showOverlayBar:
         typeof preferencesSource.showOverlayBar === 'boolean'
@@ -540,6 +645,7 @@ function savePersistentState() {
     version: PERSISTENCE_VERSION,
     preferences: {
       allowedLanguages: state.allowedLanguages,
+      interfaceLanguage: state.interfaceLanguage,
       model: state.model,
       showOverlayBar: state.showOverlayBar,
       soundEffectsEnabled: state.soundEffectsEnabled,
@@ -825,13 +931,17 @@ function normalizeCaptureMode(mode) {
 function getWaitingNotice(captureMode) {
   if (state.switchingModel) {
     return captureMode === 'hands-free'
-      ? `Trocando para ${getModelDisplayName(state.model)}. O modo hands-free sera ativado quando o novo worker ficar pronto.`
-      : `Trocando para ${getModelDisplayName(state.model)}. Aguarde o novo worker ficar pronto.`;
+      ? translateMain('waitingSwitchHandsFree', {
+          model: getModelDisplayName(state.model),
+        })
+      : translateMain('waitingSwitchHold', {
+          model: getModelDisplayName(state.model),
+        });
   }
 
   return captureMode === 'hands-free'
-    ? 'O modelo ainda esta carregando. O modo hands-free sera iniciado quando estiver pronto.'
-    : 'O modelo ainda esta carregando. Aguarde alguns segundos.';
+    ? translateMain('waitingBootHandsFree')
+    : translateMain('waitingBootHold');
 }
 
 function isHandsFreeNotice(notice) {
@@ -1035,7 +1145,7 @@ function startListening(mode = 'hold') {
     if (captureMode === 'hands-free' && state.captureMode !== 'hands-free') {
       setState({
         captureMode,
-        notice: HANDS_FREE_ACTIVE_NOTICE,
+        notice: translateMain('handsFreeActive'),
         error: '',
       });
       playHandsFreeSoundIfEligible();
@@ -1050,7 +1160,7 @@ function startListening(mode = 'hold') {
     captureMode,
     dictationSessionId: sessionId,
     pendingStartMode: null,
-    notice: captureMode === 'hands-free' ? HANDS_FREE_ACTIVE_NOTICE : clearHandsFreeNotice(),
+    notice: captureMode === 'hands-free' ? translateMain('handsFreeActive') : clearHandsFreeNotice(),
     error: '',
   });
   if (Date.now() >= suppressStartSoundUntil) {
@@ -1211,10 +1321,7 @@ async function handleServiceEvent(event) {
           deviceNote: payload.note || state.deviceNote,
           switchingModel: false,
           pendingPaste: false,
-          notice:
-            state.notice.startsWith('Trocando para ') && pendingStartMode !== 'hands-free'
-              ? ''
-              : state.notice,
+          notice: pendingStartMode !== 'hands-free' ? '' : state.notice,
           error: '',
         });
         if (shouldPlayLoadedFeedback) {
@@ -1761,6 +1868,9 @@ async function applySettings(patch) {
   const nextLanguages = patch.allowedLanguages
     ? normalizeLanguages(patch.allowedLanguages)
     : state.allowedLanguages;
+  const nextInterfaceLanguage = Object.prototype.hasOwnProperty.call(patch, 'interfaceLanguage')
+    ? normalizeInterfaceLanguage(patch.interfaceLanguage)
+    : state.interfaceLanguage;
   const nextModel = patch.model ? normalizeModel(patch.model) : state.model;
   const nextShowOverlayBar =
     typeof patch.showOverlayBar === 'boolean' ? patch.showOverlayBar : state.showOverlayBar;
@@ -1774,6 +1884,7 @@ async function applySettings(patch) {
 
   const modelChanged = nextModel !== state.model;
   const languagesChanged = nextLanguages.join(',') !== state.allowedLanguages.join(',');
+  const interfaceLanguageChanged = nextInterfaceLanguage !== state.interfaceLanguage;
   const overlayChanged = nextShowOverlayBar !== state.showOverlayBar;
   const soundEffectsChanged = nextSoundEffectsEnabled !== state.soundEffectsEnabled;
   const dictionaryChanged =
@@ -1781,17 +1892,31 @@ async function applySettings(patch) {
 
   let notice = state.notice;
   if (languagesChanged) {
-    notice = `Idiomas ativos: ${nextLanguages.map((language) => language.toUpperCase()).join(', ')}.`;
+    notice = translateMain(
+      'activeLanguages',
+      {
+        languages: nextLanguages.map((language) => language.toUpperCase()).join(', '),
+      },
+      nextInterfaceLanguage,
+    );
   } else if (modelChanged) {
-    notice = `Trocando para ${getModelDisplayName(nextModel)}...`;
+    notice = translateMain(
+      'switchingModel',
+      { model: getModelDisplayName(nextModel, nextInterfaceLanguage) },
+      nextInterfaceLanguage,
+    );
   } else if (overlayChanged) {
-    notice = nextShowOverlayBar
-      ? 'Barra flutuante ativada.'
-      : 'Barra flutuante desativada.';
+    notice = translateMain(
+      nextShowOverlayBar ? 'overlayOn' : 'overlayOff',
+      {},
+      nextInterfaceLanguage,
+    );
   } else if (soundEffectsChanged) {
-    notice = nextSoundEffectsEnabled
-      ? 'Feedback sonoro ativado.'
-      : 'Feedback sonoro desativado.';
+    notice = translateMain(
+      nextSoundEffectsEnabled ? 'soundOn' : 'soundOff',
+      {},
+      nextInterfaceLanguage,
+    );
   } else if (dictionaryChanged) {
     notice =
       nextDictionaryEntries.length > 0
@@ -1799,8 +1924,19 @@ async function applySettings(patch) {
         : 'Dicionário limpo.';
   }
 
+  if (dictionaryChanged) {
+    notice = nextDictionaryEntries.length > 0
+      ? translateMain(
+          'dictionaryOn',
+          { count: nextDictionaryEntries.length },
+          nextInterfaceLanguage,
+        )
+      : translateMain('dictionaryOff', {}, nextInterfaceLanguage);
+  }
+
   setState({
     allowedLanguages: nextLanguages,
+    interfaceLanguage: nextInterfaceLanguage,
     model: nextModel,
     showOverlayBar: nextShowOverlayBar,
     soundEffectsEnabled: nextSoundEffectsEnabled,
@@ -1828,7 +1964,7 @@ async function applySettings(patch) {
 function resetModelStats() {
   setState({
     modelStats: createEmptyStats(),
-    notice: 'Estatisticas de modelos resetadas.',
+    notice: translateMain('modelStatsReset'),
   });
   savePersistentState();
   return snapshotState();
@@ -1878,6 +2014,7 @@ app.whenReady().then(() => {
   const persistedState = loadPersistentState();
   setState({
     allowedLanguages: persistedState.preferences.allowedLanguages,
+    interfaceLanguage: persistedState.preferences.interfaceLanguage,
     model: persistedState.preferences.model,
     modelStats: persistedState.modelStats,
     history: persistedState.history,
