@@ -135,10 +135,11 @@ function renderOverlay(state) {
 
 function applyWaveLevel(level) {
   const clampedLevel = Math.max(0, Math.min(1, Number(level) || 0));
-  overlayEls.shell.style.setProperty('--overlay-level', clampedLevel.toFixed(3));
+  const visualLevel = Math.min(1, clampedLevel * 2);
+  overlayEls.shell.style.setProperty('--overlay-level', visualLevel.toFixed(3));
 
   waveBars.forEach((bar, index) => {
-    const intensity = Math.min(1, clampedLevel * barWeights[index]);
+    const intensity = Math.min(1, visualLevel * barWeights[index]);
     const height = 3 + intensity * 12;
     const opacity = 0.34 + intensity * 0.66;
     const scale = 0.82 + intensity * 0.24;

@@ -11,19 +11,20 @@ load_dotenv()
 
 class HotkeyListener:
     def __init__(self) -> None:
-        self.hotkey = os.getenv("FLOW_HOTKEY", "ctrl+shift+space")
+        self.hotkey = os.getenv("FLOW_HOTKEY", "ctrl+windows")
+        self.hands_free_hotkey = f"{self.hotkey}+space"
         self.stop_event = threading.Event()
         self.is_pressed = False
         self.active_mode = "hold"
         self.state_lock = threading.Lock()
         self.event_hook = None
-        self.suppress_hook = None
+        self.suppress_hooks: list[object] = []
         self.pressed_scan_codes: set[int] = set()
         steps = keyboard.parse_hotkey_combinations(self.hotkey)
         if len(steps) != 1:
             raise RuntimeError("Apenas atalhos globais de uma etapa sao suportados.")
         self.hotkey_combinations = [set(combination) for combination in steps[0]]
-        self.alt_scan_codes = self._resolve_scan_codes("alt", "left alt", "right alt")
+        self.space_scan_codes = self._resolve_scan_codes("space")
         self.escape_scan_codes = self._resolve_scan_codes("esc", "escape")
 
     def emit(self, event_type: str, payload: dict | None = None) -> None:
@@ -33,12 +34,15 @@ class HotkeyListener:
         if not self.hotkey_combinations:
             raise RuntimeError(f"Atalho invalido: {self.hotkey}")
 
-        self.suppress_hook = keyboard.add_hotkey(
-            self.hotkey,
-            lambda: None,
-            suppress=True,
-            trigger_on_release=False,
-        )
+        for hotkey in {self.hotkey, self.hands_free_hotkey}:
+            self.suppress_hooks.append(
+                keyboard.add_hotkey(
+                    hotkey,
+                    lambda: None,
+                    suppress=True,
+                    trigger_on_release=False,
+                )
+            )
         self.event_hook = keyboard.hook(self._handle_key_event)
         self.emit("ready", {"shortcut": self.hotkey})
 
@@ -53,7 +57,7 @@ class HotkeyListener:
         self.active_mode = "hold"
         self.pressed_scan_codes.clear()
         self.event_hook = None
-        self.suppress_hook = None
+        self.suppress_hooks.clear()
 
     @staticmethod
     def _resolve_scan_codes(*keys: str) -> set[int]:
@@ -85,13 +89,17 @@ class HotkeyListener:
             combo_active = any(
                 combination.issubset(self.pressed_scan_codes) for combination in self.hotkey_combinations
             )
+            wants_hands_free = bool(self.space_scan_codes & self.pressed_scan_codes)
 
             if combo_active and not self.is_pressed:
                 self.is_pressed = True
-                self.active_mode = (
-                    "hands-free" if self.alt_scan_codes & self.pressed_scan_codes else "hold"
-                )
+                self.active_mode = "hands-free" if wants_hands_free else "hold"
                 self.emit("hotkey-pressed", {"shortcut": self.hotkey, "mode": self.active_mode})
+                return
+
+            if combo_active and self.is_pressed and self.active_mode != "hands-free" and wants_hands_free:
+                self.active_mode = "hands-free"
+                self.emit("hotkey-mode-changed", {"shortcut": self.hotkey, "mode": self.active_mode})
                 return
 
             if not combo_active and self.is_pressed:

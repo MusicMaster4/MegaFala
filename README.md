@@ -29,7 +29,7 @@ Edite [`.env`](H:/Python/Tools/Wispr%20Flow%20Clone/.env) se quiser trocar os de
 WHISPER_MODEL=medium
 WHISPER_DEVICE=auto
 WHISPER_COMPUTE_TYPE=
-FLOW_HOTKEY=ctrl+shift+space
+FLOW_HOTKEY=ctrl+windows
 ALLOWED_LANGUAGES=pt,en
 ```
 
@@ -49,9 +49,11 @@ npm start
 
 1. Espere o estado ficar `Pronto`.
 2. Abra o app onde voce quer colar o texto e deixe o foco no campo.
-3. Segure o atalho global enquanto fala.
-4. Solte o atalho para transcrever e colar.
-5. Troque o modelo na lateral direita para comparar latencia media e qualidade.
+3. Segure `Ctrl+Win` enquanto fala.
+4. Solte `Ctrl+Win` para transcrever e colar.
+5. Para entrar em hands-free, use `Ctrl+Win+Space` ou aperte `Space` enquanto ainda estiver segurando `Ctrl+Win`.
+6. No hands-free, pressione `Ctrl+Win` novamente para finalizar e transcrever.
+7. Troque o modelo na lateral direita para comparar latencia media e qualidade.
 
 ## Observacoes
 

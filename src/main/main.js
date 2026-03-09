@@ -6,7 +6,7 @@ const { app, BrowserWindow, clipboard, ipcMain, screen } = require('electron');
 const { spawn } = require('child_process');
 const readline = require('readline');
 
-const DEFAULT_SHORTCUT = 'ctrl+shift+space';
+const DEFAULT_SHORTCUT = 'ctrl+windows';
 const DEFAULT_LANGUAGES = ['pt', 'en'];
 const DEFAULT_SHOW_OVERLAY_BAR = true;
 const PERSISTENCE_VERSION = 2;
@@ -17,7 +17,7 @@ const OVERLAY_MARGIN_BOTTOM = 22;
 const APP_NAME = 'MegaFala';
 const APP_ID = 'com.megafala.app';
 const HANDS_FREE_ACTIVE_NOTICE =
-  'Modo hands-free ativo. Pressione Ctrl + Shift + Space para finalizar e transcrever.';
+  'Modo hands-free ativo. Pressione Ctrl + Win para finalizar e transcrever.';
 const MODEL_OPTIONS = [
   {
     id: 'tiny',
@@ -363,7 +363,7 @@ function normalizePersistedState(payload) {
         typeof preferencesSource.showOverlayBar === 'boolean'
           ? preferencesSource.showOverlayBar
           : defaults.showOverlayBar,
-      overlayPosition: normalizeOverlayPosition(preferencesSource.overlayPosition),
+      overlayPosition: defaults.overlayPosition,
     },
     modelStats: normalizeStats(source.modelStats),
     history: normalizeHistory(source.history),
@@ -399,7 +399,7 @@ function savePersistentState() {
       allowedLanguages: state.allowedLanguages,
       model: state.model,
       showOverlayBar: state.showOverlayBar,
-      overlayPosition: state.overlayPosition,
+      overlayPosition: defaults.overlayPosition,
     },
     modelStats: state.modelStats,
     history: state.history,
@@ -466,8 +466,16 @@ function positionOverlayWindow(preferredPosition = state.overlayPosition, persis
     return null;
   }
 
+  const hadPosition = Boolean(normalizeOverlayPosition(preferredPosition));
   const bounds = getOverlayBounds(preferredPosition);
   overlayWindow.setBounds(bounds, false);
+
+  if (!hadPosition) {
+    state.overlayPosition = {
+      x: bounds.x,
+      y: bounds.y,
+    };
+  }
 
   if (persist) {
     setState({
@@ -616,6 +624,18 @@ function normalizeCaptureMode(mode) {
   return mode === 'hands-free' ? 'hands-free' : 'hold';
 }
 
+function getWaitingNotice(captureMode) {
+  if (state.switchingModel) {
+    return captureMode === 'hands-free'
+      ? `Trocando para ${getModelDisplayName(state.model)}. O modo hands-free sera ativado quando o novo worker ficar pronto.`
+      : `Trocando para ${getModelDisplayName(state.model)}. Aguarde o novo worker ficar pronto.`;
+  }
+
+  return captureMode === 'hands-free'
+    ? 'O modelo ainda esta carregando. O modo hands-free sera iniciado quando estiver pronto.'
+    : 'O modelo ainda esta carregando. Aguarde alguns segundos.';
+}
+
 function isHandsFreeNotice(notice) {
   return String(notice || '').toLowerCase().includes('hands-free');
 }
@@ -668,23 +688,22 @@ function startListening(mode = 'hold') {
   const captureMode = normalizeCaptureMode(mode);
 
   if (!state.engineReady || !state.serviceOnline) {
-    const waitingNotice = state.switchingModel
-      ? captureMode === 'hands-free'
-        ? `Trocando para ${getModelDisplayName(state.model)}. O modo hands-free sera ativado quando o novo worker ficar pronto.`
-        : `Trocando para ${getModelDisplayName(state.model)}. Aguarde o novo worker ficar pronto.`
-      : captureMode === 'hands-free'
-        ? 'O modelo ainda esta carregando. O modo hands-free sera iniciado quando estiver pronto.'
-        : 'O modelo ainda esta carregando. Aguarde alguns segundos.';
-
     setState({
       pendingStartMode: captureMode,
-      notice: waitingNotice,
+      notice: getWaitingNotice(captureMode),
       error: '',
     });
     return snapshotState();
   }
 
-  if (state.listening) {
+  if (state.listening || state.captureMode !== null) {
+    if (captureMode === 'hands-free' && state.captureMode !== 'hands-free') {
+      setState({
+        captureMode,
+        notice: HANDS_FREE_ACTIVE_NOTICE,
+        error: '',
+      });
+    }
     return snapshotState();
   }
 
@@ -704,7 +723,7 @@ function startListening(mode = 'hold') {
 function stopListening() {
   const nextNotice = clearHandsFreeNotice();
 
-  if (!state.listening && !state.pendingStartMode) {
+  if (!state.listening && !state.pendingStartMode && state.dictationSessionId === null) {
     setOverlayAudioLevel(0);
     setState({
       captureMode: null,
@@ -972,11 +991,14 @@ function handleHotkeyEvent(event) {
       setState({
         hotkeyPressed: true,
       });
-      if (state.captureMode === 'hands-free' && state.listening) {
+      if (state.captureMode === 'hands-free' || state.pendingStartMode === 'hands-free') {
         stopListening();
         break;
       }
 
+      startListening(hotkeyMode);
+      break;
+    case 'hotkey-mode-changed':
       startListening(hotkeyMode);
       break;
     case 'hotkey-released':
@@ -1367,7 +1389,7 @@ app.whenReady().then(() => {
     history: persistedState.history,
     usageStats: persistedState.usageStats,
     showOverlayBar: persistedState.preferences.showOverlayBar,
-    overlayPosition: persistedState.preferences.overlayPosition,
+    overlayPosition: defaults.overlayPosition,
   });
 
   createWindow();

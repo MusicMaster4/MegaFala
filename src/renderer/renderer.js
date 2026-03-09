@@ -86,9 +86,21 @@ function formatShortcut(shortcut) {
       if (token === 'alt') {
         return 'Alt';
       }
+      if (token === 'windows' || token === 'left windows' || token === 'right windows') {
+        return 'Win';
+      }
       return token.length === 1 ? token.toUpperCase() : token;
     })
     .join(' + ');
+}
+
+function formatShortcutGuide(shortcut) {
+  const baseShortcut = formatShortcut(shortcut);
+  if (!baseShortcut) {
+    return '--';
+  }
+
+  return `${baseShortcut} / ${baseShortcut} + Space`;
 }
 
 function formatLanguage(language) {
@@ -270,7 +282,7 @@ function renderState(state) {
     : `Carregando modelo ${formatModel(state.model)}...`;
   els.partialText.textContent = state.partial || 'Aguardando fala...';
   els.partialText.dataset.empty = state.partial ? 'false' : 'true';
-  els.shortcutLabel.textContent = formatShortcut(state.shortcut);
+  els.shortcutLabel.textContent = formatShortcutGuide(state.shortcut);
   els.languageBadge.textContent = formatLanguage(state.latestLanguage);
   els.activeModelLabel.textContent = `${formatModel(state.model)} (${state.model})`;
   els.deviceLabel.textContent = device;

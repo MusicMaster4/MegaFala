@@ -10,7 +10,6 @@
   --overlay-loading: #efbbb8;
   --overlay-loading-glow: rgba(239, 187, 184, 0.24);
   --overlay-error: #ff8a80;
-  --overlay-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
   --overlay-level: 0;
 }
 
@@ -49,12 +48,10 @@ body {
     linear-gradient(180deg, var(--overlay-shell-highlight), transparent 36%),
     var(--overlay-shell);
   border: 1px solid var(--overlay-shell-edge);
-  box-shadow: var(--overlay-shadow);
-  backdrop-filter: blur(24px);
   overflow: hidden;
   cursor: grab;
   user-select: none;
-  transition: border-color 180ms ease, box-shadow 180ms ease;
+  transition: border-color 180ms ease, background-color 180ms ease;
 }
 
 .overlay-pill::before {
@@ -178,10 +175,9 @@ body {
 
 .overlay-shell[data-hands-free='true'] .overlay-pill {
   border-color: rgba(255, 139, 122, 0.42);
-  box-shadow:
-    var(--overlay-shadow),
-    0 0 0 1px rgba(255, 139, 122, 0.12),
-    0 0 16px rgba(255, 139, 122, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 36%),
+    rgba(18, 12, 12, 0.97);
 }
 
 .overlay-shell[data-hands-free='true'][data-mode='recording'] .overlay-halo {
