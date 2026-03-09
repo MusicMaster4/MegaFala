@@ -1,0 +1,294 @@
+:root {
+  --overlay-shell: rgba(8, 12, 19, 0.82);
+  --overlay-shell-edge: rgba(255, 255, 255, 0.08);
+  --overlay-shell-highlight: rgba(255, 255, 255, 0.12);
+  --overlay-idle: rgba(241, 246, 255, 0.78);
+  --overlay-recording: #7dffd2;
+  --overlay-recording-soft: rgba(125, 255, 210, 0.18);
+  --overlay-loading: #ffd37a;
+  --overlay-loading-soft: rgba(255, 211, 122, 0.2);
+  --overlay-error: #ff8a80;
+  --overlay-shadow: 0 18px 48px rgba(0, 0, 0, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  padding: 10px 12px 12px;
+  font-family: "Aptos", "Calibri", sans-serif;
+}
+
+.overlay-shell {
+  width: 100%;
+  height: 100%;
+}
+
+.overlay-pill {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at top, var(--overlay-shell-highlight), transparent 52%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 58%),
+    var(--overlay-shell);
+  border: 1px solid var(--overlay-shell-edge);
+  box-shadow: var(--overlay-shadow);
+  backdrop-filter: blur(22px);
+  overflow: hidden;
+}
+
+.overlay-pill::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 38%);
+  pointer-events: none;
+}
+
+.overlay-node {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+
+.overlay-node span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(241, 246, 255, 0.36);
+  box-shadow: 0 0 12px rgba(241, 246, 255, 0.18);
+  transition: transform 220ms ease, opacity 220ms ease, background-color 220ms ease;
+}
+
+.overlay-core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+}
+
+.overlay-core__halo {
+  position: absolute;
+  width: 94px;
+  height: 44px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(241, 246, 255, 0.18), transparent 68%);
+  opacity: 0.44;
+  filter: blur(8px);
+  transition: background 220ms ease, opacity 220ms ease, transform 220ms ease;
+}
+
+.overlay-wave,
+.overlay-loader,
+.overlay-glyph {
+  position: relative;
+  z-index: 1;
+}
+
+.overlay-wave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+}
+
+.overlay-wave span {
+  width: 4px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--overlay-recording);
+  box-shadow: 0 0 14px rgba(125, 255, 210, 0.42);
+  animation: wave 820ms ease-in-out infinite;
+}
+
+.overlay-wave span:nth-child(2) {
+  animation-delay: 80ms;
+}
+
+.overlay-wave span:nth-child(3) {
+  animation-delay: 160ms;
+}
+
+.overlay-wave span:nth-child(4) {
+  animation-delay: 240ms;
+}
+
+.overlay-wave span:nth-child(5) {
+  animation-delay: 320ms;
+}
+
+.overlay-wave span:nth-child(6) {
+  animation-delay: 400ms;
+}
+
+.overlay-wave span:nth-child(7) {
+  animation-delay: 480ms;
+}
+
+.overlay-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.overlay-loader span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--overlay-loading);
+  box-shadow: 0 0 16px rgba(255, 211, 122, 0.38);
+  animation: pulse-dot 860ms ease-in-out infinite;
+}
+
+.overlay-loader span:nth-child(2) {
+  animation-delay: 110ms;
+}
+
+.overlay-loader span:nth-child(3) {
+  animation-delay: 220ms;
+}
+
+.overlay-glyph {
+  width: 54px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(241, 246, 255, 0.14);
+  background:
+    linear-gradient(90deg, transparent, rgba(241, 246, 255, 0.44), transparent),
+    rgba(241, 246, 255, 0.06);
+  overflow: hidden;
+}
+
+.overlay-glyph::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 18px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--overlay-idle);
+  box-shadow: 0 0 14px rgba(241, 246, 255, 0.25);
+}
+
+.overlay-shell[data-mode='recording'] .overlay-core__halo {
+  background: radial-gradient(circle, var(--overlay-recording-soft), transparent 70%);
+  opacity: 1;
+  animation: halo-pulse 920ms ease-in-out infinite;
+}
+
+.overlay-shell[data-mode='recording'] .overlay-node span {
+  background: rgba(125, 255, 210, 0.72);
+  box-shadow: 0 0 14px rgba(125, 255, 210, 0.28);
+}
+
+.overlay-shell[data-mode='recording'] .overlay-node--left span:first-child,
+.overlay-shell[data-mode='recording'] .overlay-node--right span:last-child {
+  transform: scale(1.4);
+}
+
+.overlay-shell[data-mode='loading'] .overlay-core__halo {
+  background: radial-gradient(circle, var(--overlay-loading-soft), transparent 70%);
+  opacity: 0.92;
+}
+
+.overlay-shell[data-mode='loading'] .overlay-node span {
+  background: rgba(255, 211, 122, 0.7);
+  box-shadow: 0 0 14px rgba(255, 211, 122, 0.26);
+  animation: side-breathe 1s ease-in-out infinite;
+}
+
+.overlay-shell[data-mode='loading'] .overlay-node span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.overlay-shell[data-mode='error'] .overlay-core__halo {
+  background: radial-gradient(circle, rgba(255, 138, 128, 0.2), transparent 70%);
+  opacity: 0.84;
+}
+
+.overlay-shell[data-mode='error'] .overlay-glyph {
+  border-color: rgba(255, 138, 128, 0.2);
+  background: rgba(255, 138, 128, 0.08);
+}
+
+.overlay-shell[data-mode='error'] .overlay-glyph::before {
+  width: 24px;
+  background: var(--overlay-error);
+  box-shadow: 0 0 14px rgba(255, 138, 128, 0.24);
+}
+
+.hidden {
+  display: none;
+}
+
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+    opacity: 0.42;
+  }
+
+  50% {
+    transform: scaleY(1.95);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    transform: scale(0.72);
+    opacity: 0.38;
+  }
+
+  50% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+}
+
+@keyframes halo-pulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+  }
+
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes side-breathe {
+  0%,
+  100% {
+    transform: scale(0.84);
+    opacity: 0.44;
+  }
+
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+  }
+}

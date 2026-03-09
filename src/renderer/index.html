@@ -26,6 +26,9 @@
             <span>Atalho global</span>
             <strong id="shortcut-label">Ctrl + Shift + Space</strong>
           </div>
+          <button class="settings-button" id="open-settings" type="button">
+            Configuracoes
+          </button>
         </div>
       </header>
 
@@ -48,7 +51,7 @@
         </article>
       </section>
 
-      <section class="workspace">
+      <section class="workspace workspace--single">
         <section class="main-column">
           <article class="status-panel">
             <div class="status-panel__main">
@@ -111,9 +114,55 @@
             </div>
           </article>
         </section>
+      </section>
 
-        <aside class="side-column">
-          <article class="panel">
+      <section class="notice hidden" id="notice-strip"></section>
+
+      <div class="settings-backdrop hidden" id="settings-backdrop"></div>
+      <aside
+        class="settings-drawer hidden"
+        id="settings-drawer"
+        aria-hidden="true"
+        aria-labelledby="settings-title"
+      >
+        <div class="settings-drawer__header">
+          <div>
+            <span class="settings-eyebrow">Ajustes</span>
+            <h2 id="settings-title">Configuracoes</h2>
+            <p class="section-head__copy">
+              Controle a barra flutuante, os idiomas ativos e o modelo de ditado.
+            </p>
+          </div>
+          <button class="secondary-button" id="close-settings" type="button">
+            Fechar
+          </button>
+        </div>
+
+        <div class="settings-stack">
+          <article class="panel panel--settings">
+            <div class="section-head section-head--compact">
+              <div>
+                <h2>Barra flutuante</h2>
+                <p class="section-head__copy">
+                  Mostra o indicador visual de gravacao acima de qualquer app.
+                </p>
+              </div>
+            </div>
+            <label class="toggle-card" for="show-overlay-bar">
+              <div>
+                <strong>Exibir overlay global</strong>
+                <p>
+                  Durante a gravacao aparece a animacao de audio. Ao soltar, ele mostra carregamento.
+                </p>
+              </div>
+              <span class="toggle-switch">
+                <input id="show-overlay-bar" type="checkbox" />
+                <span></span>
+              </span>
+            </label>
+          </article>
+
+          <article class="panel panel--settings">
             <div class="section-head section-head--compact">
               <div>
                 <h2>Idiomas ativos</h2>
@@ -134,7 +183,7 @@
             </div>
           </article>
 
-          <article class="panel">
+          <article class="panel panel--settings">
             <div class="section-head section-head--compact">
               <div>
                 <h2>Modelos</h2>
@@ -148,10 +197,8 @@
             </div>
             <div class="model-list" id="model-list"></div>
           </article>
-        </aside>
-      </section>
-
-      <section class="notice hidden" id="notice-strip"></section>
+        </div>
+      </aside>
     </main>
 
     <script src="./renderer.js"></script>

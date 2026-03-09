@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flow Local Overlay</title>
+    <link rel="stylesheet" href="./overlay.css" />
+  </head>
+  <body>
+    <main class="overlay-shell" id="overlay-shell" data-mode="idle" aria-hidden="true">
+      <section class="overlay-pill">
+        <div class="overlay-node overlay-node--left">
+          <span></span>
+          <span></span>
+        </div>
+
+        <div class="overlay-core">
+          <div class="overlay-core__halo"></div>
+
+          <div class="overlay-wave" id="overlay-wave">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+
+          <div class="overlay-loader hidden" id="overlay-loader">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+
+          <div class="overlay-glyph hidden" id="overlay-glyph"></div>
+        </div>
+
+        <div class="overlay-node overlay-node--right">
+          <span></span>
+          <span></span>
+        </div>
+      </section>
+    </main>
+
+    <script src="./overlay.js"></script>
+  </body>
+</html>

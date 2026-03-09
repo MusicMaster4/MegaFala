@@ -2,14 +2,18 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(process.cwd(), '.env') });
 
-const { app, BrowserWindow, clipboard, ipcMain } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, screen } = require('electron');
 const { spawn } = require('child_process');
 const readline = require('readline');
 
 const DEFAULT_SHORTCUT = 'ctrl+shift+space';
 const DEFAULT_LANGUAGES = ['pt', 'en'];
+const DEFAULT_SHOW_OVERLAY_BAR = true;
 const MAX_HISTORY = 100;
 const SERVICE_SHUTDOWN_TIMEOUT_MS = 2500;
+const OVERLAY_WIDTH = 304;
+const OVERLAY_HEIGHT = 78;
+const OVERLAY_MARGIN_BOTTOM = 22;
 const MODEL_OPTIONS = [
   {
     id: 'tiny',
@@ -39,6 +43,7 @@ const MODEL_OPTIONS = [
 ];
 
 let mainWindow = null;
+let overlayWindow = null;
 let serviceProcess = null;
 let serviceReader = null;
 let hotkeyProcess = null;
@@ -231,6 +236,7 @@ function getDefaultsFromEnv() {
     shortcut: String(process.env.FLOW_HOTKEY || DEFAULT_SHORTCUT).toLowerCase(),
     allowedLanguages: normalizeLanguages(process.env.ALLOWED_LANGUAGES || DEFAULT_LANGUAGES.join(',')),
     model: normalizeModel(getDefaultModel()),
+    showOverlayBar: DEFAULT_SHOW_OVERLAY_BAR,
   };
 }
 
@@ -259,6 +265,8 @@ const state = {
   error: '',
   history: [],
   usageStats: createEmptyUsageStats(),
+  showOverlayBar: defaults.showOverlayBar,
+  pendingPaste: false,
 };
 
 function getProjectRoot() {
@@ -284,6 +292,10 @@ function loadUserSettings() {
       modelStats: normalizeStats(parsed.modelStats),
       history: normalizeHistory(parsed.history),
       usageStats: normalizeUsageStats(parsed.usageStats),
+      showOverlayBar:
+        typeof parsed.showOverlayBar === 'boolean'
+          ? parsed.showOverlayBar
+          : defaults.showOverlayBar,
     };
   } catch (_error) {
     return {
@@ -292,6 +304,7 @@ function loadUserSettings() {
       modelStats: createEmptyStats(),
       history: [],
       usageStats: createEmptyUsageStats(),
+      showOverlayBar: defaults.showOverlayBar,
     };
   }
 }
@@ -303,6 +316,7 @@ function saveUserSettings() {
     modelStats: state.modelStats,
     history: state.history,
     usageStats: state.usageStats,
+    showOverlayBar: state.showOverlayBar,
   };
 
   fs.mkdirSync(path.dirname(getSettingsPath()), { recursive: true });
@@ -326,6 +340,87 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(getProjectRoot(), 'src', 'renderer', 'index.html'));
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+}
+
+function getOverlayBounds() {
+  const point = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(point);
+  const { workArea } = display;
+
+  return {
+    width: OVERLAY_WIDTH,
+    height: OVERLAY_HEIGHT,
+    x: Math.round(workArea.x + (workArea.width - OVERLAY_WIDTH) / 2),
+    y: Math.round(workArea.y + workArea.height - OVERLAY_HEIGHT - OVERLAY_MARGIN_BOTTOM),
+  };
+}
+
+function positionOverlayWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    return;
+  }
+
+  overlayWindow.setBounds(getOverlayBounds(), false);
+}
+
+function syncOverlayWindow() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    return;
+  }
+
+  positionOverlayWindow();
+
+  if (state.showOverlayBar) {
+    if (!overlayWindow.isVisible()) {
+      overlayWindow.showInactive();
+    }
+  } else if (overlayWindow.isVisible()) {
+    overlayWindow.hide();
+  }
+}
+
+function createOverlayWindow() {
+  overlayWindow = new BrowserWindow({
+    width: OVERLAY_WIDTH,
+    height: OVERLAY_HEIGHT,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'overlay-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.setMenuBarVisibility(false);
+  overlayWindow.loadFile(path.join(getProjectRoot(), 'src', 'renderer', 'overlay.html'));
+
+  overlayWindow.on('ready-to-show', () => {
+    syncOverlayWindow();
+  });
+
+  overlayWindow.on('closed', () => {
+    overlayWindow = null;
+  });
 }
 
 function snapshotState() {
@@ -341,6 +436,11 @@ function setState(patch) {
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('app-state', snapshotState());
+  }
+
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send('app-state', snapshotState());
+    syncOverlayWindow();
   }
 }
 
@@ -503,6 +603,7 @@ async function handleServiceEvent(event) {
         device: payload.device || state.device,
         deviceNote: payload.note || state.deviceNote,
         switchingModel: false,
+        pendingPaste: false,
         notice: state.notice.startsWith('Trocando para ') ? '' : state.notice,
         error: '',
       });
@@ -514,7 +615,10 @@ async function handleServiceEvent(event) {
     case 'state':
       setState({
         listening: Boolean(payload.listening),
-        phase: payload.phase || state.phase,
+        phase:
+          state.pendingPaste && (payload.phase === 'idle' || payload.phase === 'transcribing')
+            ? 'transcribing'
+            : payload.phase || state.phase,
       });
       break;
     case 'partial':
@@ -547,6 +651,8 @@ async function handleServiceEvent(event) {
         partial: '',
         history,
         usageStats,
+        pendingPaste: true,
+        phase: 'transcribing',
         error: '',
       });
       saveUserSettings();
@@ -559,6 +665,11 @@ async function handleServiceEvent(event) {
         setState({
           error: `Falha ao colar texto no campo ativo: ${error.message}`,
         });
+      } finally {
+        setState({
+          pendingPaste: false,
+          phase: state.listening ? 'listening' : 'idle',
+        });
       }
       break;
     }
@@ -569,6 +680,7 @@ async function handleServiceEvent(event) {
       setState({
         notice: '',
         error: payload.message || 'Erro no motor de ditado.',
+        pendingPaste: false,
         phase: 'error',
       });
       break;
@@ -650,6 +762,7 @@ function bootDictationService() {
     serviceOnline: true,
     engineReady: false,
     listening: false,
+    pendingPaste: false,
     partial: '',
     notice: state.switchingModel ? state.notice : '',
     error: '',
@@ -848,6 +961,7 @@ async function restartDictationService() {
     listening: false,
     hotkeyPressed: false,
     pendingStartOnReady: false,
+    pendingPaste: false,
     partial: '',
     phase: 'booting',
     switchingModel: true,
@@ -865,18 +979,29 @@ async function applySettings(patch) {
     ? normalizeLanguages(patch.allowedLanguages)
     : state.allowedLanguages;
   const nextModel = patch.model ? normalizeModel(patch.model) : state.model;
+  const nextShowOverlayBar =
+    typeof patch.showOverlayBar === 'boolean' ? patch.showOverlayBar : state.showOverlayBar;
 
   const modelChanged = nextModel !== state.model;
   const languagesChanged = nextLanguages.join(',') !== state.allowedLanguages.join(',');
+  const overlayChanged = nextShowOverlayBar !== state.showOverlayBar;
+
+  let notice = state.notice;
+  if (languagesChanged) {
+    notice = `Idiomas ativos: ${nextLanguages.map((language) => language.toUpperCase()).join(', ')}.`;
+  } else if (modelChanged) {
+    notice = `Trocando para ${getModelDisplayName(nextModel)}...`;
+  } else if (overlayChanged) {
+    notice = nextShowOverlayBar
+      ? 'Barra flutuante ativada.'
+      : 'Barra flutuante desativada.';
+  }
 
   setState({
     allowedLanguages: nextLanguages,
     model: nextModel,
-    notice: languagesChanged
-      ? `Idiomas ativos: ${nextLanguages.map((language) => language.toUpperCase()).join(', ')}.`
-      : modelChanged
-        ? `Trocando para ${getModelDisplayName(nextModel)}...`
-        : state.notice,
+    showOverlayBar: nextShowOverlayBar,
+    notice,
     error: '',
   });
 
@@ -933,15 +1058,24 @@ app.whenReady().then(() => {
     modelStats: userSettings.modelStats,
     history: userSettings.history,
     usageStats: userSettings.usageStats,
+    showOverlayBar: userSettings.showOverlayBar,
   });
 
   createWindow();
+  createOverlayWindow();
   bootDictationService();
   bootHotkeyListener();
 
+  screen.on('display-added', positionOverlayWindow);
+  screen.on('display-removed', positionOverlayWindow);
+  screen.on('display-metrics-changed', positionOverlayWindow);
+
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
       createWindow();
+    }
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      createOverlayWindow();
     }
   });
 });

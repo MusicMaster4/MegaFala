@@ -45,11 +45,17 @@ const els = {
   daysUsedValue: document.getElementById('days-used-value'),
   wordsTotalValue: document.getElementById('words-total-value'),
   wpmValue: document.getElementById('wpm-value'),
+  openSettings: document.getElementById('open-settings'),
+  closeSettings: document.getElementById('close-settings'),
+  settingsDrawer: document.getElementById('settings-drawer'),
+  settingsBackdrop: document.getElementById('settings-backdrop'),
+  showOverlayBar: document.getElementById('show-overlay-bar'),
 };
 
 let renderedHistory = [];
 let historyFilter = '';
 let lastState = null;
+let settingsOpen = false;
 
 function escapeHtml(value) {
   return String(value || '')
@@ -199,6 +205,10 @@ function renderLanguages(allowedLanguages) {
   els.langEn.checked = languages.includes('en');
 }
 
+function renderPreferences(state) {
+  els.showOverlayBar.checked = Boolean(state.showOverlayBar);
+}
+
 function renderModels(state) {
   const stats = state.modelStats || {};
   const currentModel = state.model;
@@ -257,6 +267,7 @@ function renderState(state) {
 
   renderUsageSummary(state.usageSummary);
   renderLanguages(state.allowedLanguages);
+  renderPreferences(state);
   renderModels(state);
   renderHistory(state.history, state.historyLimit);
 
@@ -275,6 +286,14 @@ function renderState(state) {
   }
 }
 
+function setSettingsOpen(open) {
+  settingsOpen = Boolean(open);
+  document.body.classList.toggle('settings-open', settingsOpen);
+  els.settingsDrawer.classList.toggle('hidden', !settingsOpen);
+  els.settingsBackdrop.classList.toggle('hidden', !settingsOpen);
+  els.settingsDrawer.setAttribute('aria-hidden', settingsOpen ? 'false' : 'true');
+}
+
 async function updateLanguages(nextLanguages) {
   const safeLanguages = nextLanguages.length > 0 ? nextLanguages : ['pt'];
   const state = await window.flowLocal.updateSettings({ allowedLanguages: safeLanguages });
@@ -291,6 +310,25 @@ function setupHandlers() {
 
   els.resetStats.addEventListener('click', async () => {
     const state = await window.flowLocal.resetModelStats();
+    renderState(state);
+  });
+
+  els.openSettings.addEventListener('click', () => {
+    setSettingsOpen(true);
+  });
+
+  els.closeSettings.addEventListener('click', () => {
+    setSettingsOpen(false);
+  });
+
+  els.settingsBackdrop.addEventListener('click', () => {
+    setSettingsOpen(false);
+  });
+
+  els.showOverlayBar.addEventListener('change', async () => {
+    const state = await window.flowLocal.updateSettings({
+      showOverlayBar: els.showOverlayBar.checked,
+    });
     renderState(state);
   });
 
@@ -321,6 +359,12 @@ function setupHandlers() {
         button.textContent = originalLabel;
       }
     }, 1200);
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && settingsOpen) {
+      setSettingsOpen(false);
+    }
   });
 }
 
