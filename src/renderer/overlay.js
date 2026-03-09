@@ -4,6 +4,7 @@ const overlayEls = {
   badge: document.getElementById('overlay-badge'),
   wave: document.getElementById('overlay-wave'),
   loader: document.getElementById('overlay-loader'),
+  readySequence: document.getElementById('overlay-ready-sequence'),
   glyph: document.getElementById('overlay-glyph'),
 };
 
@@ -14,6 +15,11 @@ let levelFrame = 0;
 let currentAudioLevel = 0;
 let targetAudioLevel = 0;
 let lastOverlayMode = 'idle';
+let currentOverlayState = {
+  phase: 'idle',
+  captureMode: null,
+  audioLevel: 0,
+};
 let soundEffectsEnabled = true;
 let feedbackTimer = null;
 let activeFeedback = null;
@@ -134,6 +140,12 @@ function handlePointerMove(event) {
 }
 
 function renderOverlay(state) {
+  currentOverlayState = {
+    phase: state.phase,
+    captureMode: state.captureMode ?? null,
+    audioLevel: state.audioLevel ?? targetAudioLevel,
+  };
+
   const mode = getOverlayMode(state);
   const handsFree = isHandsFreeActive(state);
   if (mode !== 'idle' && activeFeedback) {
@@ -144,7 +156,8 @@ function renderOverlay(state) {
   overlayEls.shell.dataset.handsFree = handsFree ? 'true' : 'false';
   overlayEls.shell.dataset.feedback = activeFeedback || 'none';
   overlayEls.wave.classList.toggle('hidden', mode !== 'recording');
-  overlayEls.loader.classList.toggle('hidden', mode !== 'loading' && activeFeedback !== 'ready');
+  overlayEls.loader.classList.toggle('hidden', mode !== 'loading');
+  overlayEls.readySequence.classList.toggle('hidden', activeFeedback !== 'ready');
   overlayEls.glyph.classList.toggle('hidden', mode === 'recording' || mode === 'loading');
   overlayEls.badge.classList.toggle('hidden', !handsFree);
   overlayEls.badge.setAttribute('aria-hidden', handsFree ? 'false' : 'true');
@@ -244,15 +257,11 @@ function clearActiveFeedback() {
 function showReadyFeedback(soundKey) {
   clearActiveFeedback();
   activeFeedback = 'ready';
-  overlayEls.shell.dataset.feedback = 'ready';
+  renderOverlay(currentOverlayState);
   queueSound(soundKey);
   feedbackTimer = window.setTimeout(() => {
     clearActiveFeedback();
-    renderOverlay({
-      phase: lastOverlayMode === 'recording' ? 'listening' : 'idle',
-      captureMode: overlayEls.shell.dataset.handsFree === 'true' ? 'hands-free' : null,
-      audioLevel: targetAudioLevel,
-    });
+    renderOverlay(currentOverlayState);
   }, 1100);
 }
 
