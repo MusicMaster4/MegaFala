@@ -20,4 +20,12 @@ contextBridge.exposeInMainWorld('flowOverlay', {
       ipcRenderer.removeListener('overlay-audio-level', listener);
     };
   },
+  onFeedback: (callback) => {
+    const listener = (_event, feedback) => callback(feedback);
+    ipcRenderer.on('overlay-feedback', listener);
+
+    return () => {
+      ipcRenderer.removeListener('overlay-feedback', listener);
+    };
+  },
 });

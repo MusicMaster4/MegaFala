@@ -556,6 +556,7 @@ h1, h2, h3 {
   transition: border-color 0.2s;
 }
 .toggle-card:hover { border-color: var(--panel-border-strong); }
+.panel--settings .toggle-card + .toggle-card { margin-top: 12px; }
 
 .toggle-card strong {
   display: block;

@@ -37,6 +37,7 @@ const els = {
   settingsDrawer: document.getElementById('settings-drawer'),
   settingsBackdrop: document.getElementById('settings-backdrop'),
   showOverlayBar: document.getElementById('show-overlay-bar'),
+  soundEffectsEnabled: document.getElementById('sound-effects-enabled'),
   themeRadios: document.querySelectorAll('input[name="theme"]'),
 };
 
@@ -222,6 +223,7 @@ function renderLanguages(allowedLanguages) {
 
 function renderPreferences(state) {
   els.showOverlayBar.checked = Boolean(state.showOverlayBar);
+  els.soundEffectsEnabled.checked = Boolean(state.soundEffectsEnabled);
 }
 
 function renderModels(state) {
@@ -386,6 +388,13 @@ function setupHandlers() {
   els.showOverlayBar.addEventListener('change', async () => {
     const state = await window.flowLocal.updateSettings({
       showOverlayBar: els.showOverlayBar.checked,
+    });
+    renderState(state);
+  });
+
+  els.soundEffectsEnabled.addEventListener('change', async () => {
+    const state = await window.flowLocal.updateSettings({
+      soundEffectsEnabled: els.soundEffectsEnabled.checked,
     });
     renderState(state);
   });

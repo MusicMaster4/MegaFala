@@ -14,9 +14,29 @@ let levelFrame = 0;
 let currentAudioLevel = 0;
 let targetAudioLevel = 0;
 let lastOverlayMode = 'idle';
+let soundEffectsEnabled = true;
+let feedbackTimer = null;
+let activeFeedback = null;
+let activeSoundKey = null;
+let soundDrainScheduled = false;
+
+const feedbackSounds = {
+  loaded: new Audio('../assets/audio/loaded.mp3'),
+  start: new Audio('../assets/audio/start.mp3'),
+  close: new Audio('../assets/audio/close.mp3'),
+  cancel: new Audio('../assets/audio/cancel.mp3'),
+  handsfree: new Audio('../assets/audio/handsfree.mp3'),
+};
+const soundQueue = [];
 
 const waveBars = Array.from(overlayEls.wave.querySelectorAll('span'));
 const barWeights = [0.46, 0.78, 1, 0.78, 0.46];
+
+for (const audio of Object.values(feedbackSounds)) {
+  audio.preload = 'auto';
+  audio.volume = 0.25;
+  audio.load();
+}
 
 function getOverlayMode(state) {
   switch (state.phase) {
@@ -116,10 +136,15 @@ function handlePointerMove(event) {
 function renderOverlay(state) {
   const mode = getOverlayMode(state);
   const handsFree = isHandsFreeActive(state);
+  if (mode !== 'idle' && activeFeedback) {
+    clearActiveFeedback();
+  }
+
   overlayEls.shell.dataset.mode = mode;
   overlayEls.shell.dataset.handsFree = handsFree ? 'true' : 'false';
+  overlayEls.shell.dataset.feedback = activeFeedback || 'none';
   overlayEls.wave.classList.toggle('hidden', mode !== 'recording');
-  overlayEls.loader.classList.toggle('hidden', mode !== 'loading');
+  overlayEls.loader.classList.toggle('hidden', mode !== 'loading' && activeFeedback !== 'ready');
   overlayEls.glyph.classList.toggle('hidden', mode === 'recording' || mode === 'loading');
   overlayEls.badge.classList.toggle('hidden', !handsFree);
   overlayEls.badge.setAttribute('aria-hidden', handsFree ? 'false' : 'true');
@@ -131,6 +156,104 @@ function renderOverlay(state) {
   }
 
   lastOverlayMode = mode;
+}
+
+function stopAllSounds() {
+  soundQueue.length = 0;
+  activeSoundKey = null;
+  for (const audio of Object.values(feedbackSounds)) {
+    audio.pause();
+    audio.currentTime = 0;
+  }
+}
+
+function stopActiveSound() {
+  if (!activeSoundKey) {
+    return;
+  }
+
+  const audio = feedbackSounds[activeSoundKey];
+  activeSoundKey = null;
+  if (!audio) {
+    return;
+  }
+
+  audio.pause();
+  audio.currentTime = 0;
+}
+
+function drainSoundQueue() {
+  soundDrainScheduled = false;
+  if (!soundEffectsEnabled || activeSoundKey || soundQueue.length === 0) {
+    return;
+  }
+
+  const soundKey = soundQueue.shift();
+  const audio = feedbackSounds[soundKey];
+  if (!audio) {
+    drainSoundQueue();
+    return;
+  }
+
+  activeSoundKey = soundKey;
+  audio.currentTime = 0;
+  const playResult = audio.play();
+  if (playResult && typeof playResult.catch === 'function') {
+    playResult.catch(() => {
+      activeSoundKey = null;
+      drainSoundQueue();
+    });
+  }
+}
+
+function scheduleSoundDrain() {
+  if (soundDrainScheduled) {
+    return;
+  }
+
+  soundDrainScheduled = true;
+  window.requestAnimationFrame(drainSoundQueue);
+}
+
+function queueSound(soundKey, options = {}) {
+  if (!soundEffectsEnabled || !feedbackSounds[soundKey]) {
+    return;
+  }
+
+  if (options.interrupt) {
+    soundQueue.length = 0;
+    stopActiveSound();
+    soundQueue.unshift(soundKey);
+  } else {
+    soundQueue.push(soundKey);
+  }
+
+  scheduleSoundDrain();
+}
+
+function clearActiveFeedback() {
+  if (feedbackTimer) {
+    window.clearTimeout(feedbackTimer);
+    feedbackTimer = null;
+  }
+
+  activeFeedback = null;
+  overlayEls.shell.dataset.feedback = 'none';
+}
+
+function showReadyFeedback(soundKey) {
+  clearActiveFeedback();
+  activeFeedback = 'ready';
+  overlayEls.shell.dataset.feedback = 'ready';
+  queueSound(soundKey);
+  feedbackTimer = window.setTimeout(() => {
+    clearActiveFeedback();
+    renderOverlay({
+      phase: lastOverlayMode === 'recording' ? 'listening' : 'idle',
+      captureMode: overlayEls.shell.dataset.handsFree === 'true' ? 'hands-free' : null,
+      audioLevel: targetAudioLevel,
+    });
+  }, 1100);
 }
 
 function applyWaveLevel(level) {
@@ -186,6 +309,40 @@ function bindDrag() {
   });
 }
 
+function bindSoundLifecycle() {
+  for (const [soundKey, audio] of Object.entries(feedbackSounds)) {
+    const release = () => {
+      if (activeSoundKey !== soundKey) {
+        return;
+      }
+      activeSoundKey = null;
+      scheduleSoundDrain();
+    };
+
+    audio.addEventListener('ended', release);
+    audio.addEventListener('error', release);
+  }
+}
+
+function handleFeedback(feedback) {
+  if (!feedback || typeof feedback !== 'object') {
+    return;
+  }
+
+  switch (feedback.type) {
+    case 'loaded-ready':
+      showReadyFeedback(feedback.payload?.sound || 'loaded');
+      break;
+    case 'play-sound':
+      queueSound(feedback.payload?.sound, {
+        interrupt: Boolean(feedback.payload?.interrupt),
+      });
+      break;
+    default:
+      break;
+  }
+}
+
 function initTheme() {
   const syncTheme = () => {
     const savedTheme = localStorage.getItem('megafala-theme') || 'dark';
@@ -201,11 +358,17 @@ function initTheme() {
 async function bootstrap() {
   initTheme();
   const initialState = await window.flowOverlay.getState();
+  soundEffectsEnabled = Boolean(initialState.soundEffectsEnabled);
   applyWaveLevel(initialState.audioLevel || 0);
   renderOverlay(initialState);
   bindDrag();
+  bindSoundLifecycle();
 
   window.flowOverlay.onStateUpdate((state) => {
+    soundEffectsEnabled = Boolean(state.soundEffectsEnabled);
+    if (!soundEffectsEnabled) {
+      stopAllSounds();
+    }
     renderOverlay(state);
   });
   window.flowOverlay.onAudioLevelUpdate((level) => {
@@ -214,6 +377,9 @@ async function bootstrap() {
     }
 
     setAudioLevel(level);
+  });
+  window.flowOverlay.onFeedback((feedback) => {
+    handleFeedback(feedback);
   });
 }
 

@@ -9,6 +9,7 @@ const readline = require('readline');
 const DEFAULT_SHORTCUT = 'ctrl+windows';
 const DEFAULT_LANGUAGES = ['pt', 'en'];
 const DEFAULT_SHOW_OVERLAY_BAR = true;
+const DEFAULT_SOUND_EFFECTS_ENABLED = true;
 const PERSISTENCE_VERSION = 2;
 const SERVICE_SHUTDOWN_TIMEOUT_MS = 2500;
 const OVERLAY_WIDTH = 96;
@@ -58,6 +59,12 @@ let serviceToken = 0;
 let hotkeyToken = 0;
 let audioToken = 0;
 let serviceRestartVersion = 0;
+let hasPlayedLoadedFeedback = false;
+const pendingOverlayFeedbacks = [];
+let currentDictationStartedAt = 0;
+let suppressStartSoundUntil = 0;
+let suppressStartRequestsUntil = 0;
+let ignoreNextHotkeyRelease = false;
 
 function getDefaultModel() {
   return process.env.WHISPER_MODEL || 'medium';
@@ -264,6 +271,7 @@ function getDefaultsFromEnv() {
     allowedLanguages: normalizeLanguages(process.env.ALLOWED_LANGUAGES || DEFAULT_LANGUAGES.join(',')),
     model: normalizeModel(getDefaultModel()),
     showOverlayBar: DEFAULT_SHOW_OVERLAY_BAR,
+    soundEffectsEnabled: DEFAULT_SOUND_EFFECTS_ENABLED,
     overlayPosition: null,
   };
 }
@@ -296,6 +304,7 @@ const state = {
   history: [],
   usageStats: createEmptyUsageStats(),
   showOverlayBar: defaults.showOverlayBar,
+  soundEffectsEnabled: defaults.soundEffectsEnabled,
   overlayPosition: defaults.overlayPosition,
   pendingPaste: false,
   audioLevel: 0,
@@ -335,6 +344,7 @@ function createEmptyPersistedState() {
       allowedLanguages: defaults.allowedLanguages,
       model: defaults.model,
       showOverlayBar: defaults.showOverlayBar,
+      soundEffectsEnabled: defaults.soundEffectsEnabled,
       overlayPosition: defaults.overlayPosition,
     },
     modelStats: createEmptyStats(),
@@ -366,6 +376,10 @@ function normalizePersistedState(payload) {
         typeof preferencesSource.showOverlayBar === 'boolean'
           ? preferencesSource.showOverlayBar
           : defaults.showOverlayBar,
+      soundEffectsEnabled:
+        typeof preferencesSource.soundEffectsEnabled === 'boolean'
+          ? preferencesSource.soundEffectsEnabled
+          : defaults.soundEffectsEnabled,
       overlayPosition: defaults.overlayPosition,
     },
     modelStats: normalizeStats(source.modelStats),
@@ -402,6 +416,7 @@ function savePersistentState() {
       allowedLanguages: state.allowedLanguages,
       model: state.model,
       showOverlayBar: state.showOverlayBar,
+      soundEffectsEnabled: state.soundEffectsEnabled,
       overlayPosition: defaults.overlayPosition,
     },
     modelStats: state.modelStats,
@@ -426,10 +441,14 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
 
   mainWindow.loadFile(path.join(getProjectRoot(), 'src', 'renderer', 'index.html'));
+  mainWindow.webContents.on('did-finish-load', () => {
+    syncAudioControllerConfig();
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
     if (process.platform !== 'darwin') {
@@ -530,6 +549,7 @@ function createOverlayWindow() {
       preload: path.join(__dirname, 'overlay-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
 
@@ -538,6 +558,10 @@ function createOverlayWindow() {
   overlayWindow.setIgnoreMouseEvents(false);
   overlayWindow.setMenuBarVisibility(false);
   overlayWindow.loadFile(path.join(getProjectRoot(), 'src', 'renderer', 'overlay.html'));
+  overlayWindow.webContents.on('did-finish-load', () => {
+    flushPendingOverlayFeedbacks();
+    syncAudioControllerConfig();
+  });
 
   overlayWindow.on('ready-to-show', () => {
     syncOverlayWindow();
@@ -691,6 +715,79 @@ function getSystemAudioControllerScriptPath() {
   return path.join(getProjectRoot(), 'scripts', 'system_audio_controller.ps1');
 }
 
+function sendOverlayFeedback(type, payload = {}) {
+  const message = { type, payload };
+  syncAudioControllerConfig();
+
+  if (!overlayWindow || overlayWindow.isDestroyed() || overlayWindow.webContents.isLoading()) {
+    pendingOverlayFeedbacks.push(message);
+    return;
+  }
+
+  overlayWindow.webContents.send('overlay-feedback', message);
+}
+
+function resetDictationFeedbackState() {
+  currentDictationStartedAt = 0;
+}
+
+function playHandsFreeSoundIfEligible() {
+  if (!currentDictationStartedAt) {
+    return;
+  }
+
+  if (Date.now() - currentDictationStartedAt < 1000) {
+    return;
+  }
+
+  sendOverlayFeedback('play-sound', { sound: 'handsfree' });
+}
+
+function flushPendingOverlayFeedbacks() {
+  if (!overlayWindow || overlayWindow.isDestroyed() || overlayWindow.webContents.isLoading()) {
+    return;
+  }
+
+  while (pendingOverlayFeedbacks.length > 0) {
+    overlayWindow.webContents.send('overlay-feedback', pendingOverlayFeedbacks.shift());
+  }
+}
+
+function collectAppAudioPids() {
+  const pids = new Set([process.pid]);
+
+  try {
+    for (const metric of app.getAppMetrics()) {
+      const pid = Number(metric?.pid);
+      if (Number.isInteger(pid) && pid > 0) {
+        pids.add(pid);
+      }
+    }
+  } catch (_error) {
+    // Best effort. Fallback to known window processes below.
+  }
+
+  for (const windowRef of [mainWindow, overlayWindow]) {
+    if (!windowRef || windowRef.isDestroyed()) {
+      continue;
+    }
+
+    const pid = Number(windowRef.webContents.getOSProcessId());
+    if (Number.isInteger(pid) && pid > 0) {
+      pids.add(pid);
+    }
+  }
+
+  return [...pids];
+}
+
+function syncAudioControllerConfig() {
+  sendAudioCommand('configure', {
+    excluded_pids: collectAppAudioPids(),
+    duck_volume: 0,
+  });
+}
+
 function sendAudioCommand(type, payload = {}) {
   if (!audioProcess || !audioProcess.stdin.writable) {
     return;
@@ -750,6 +847,10 @@ async function pasteLatestTranscription() {
 function startListening(mode = 'hold') {
   const captureMode = normalizeCaptureMode(mode);
 
+  if (Date.now() < suppressStartRequestsUntil) {
+    return snapshotState();
+  }
+
   if (!state.engineReady || !state.serviceOnline) {
     setState({
       pendingStartMode: captureMode,
@@ -766,11 +867,13 @@ function startListening(mode = 'hold') {
         notice: HANDS_FREE_ACTIVE_NOTICE,
         error: '',
       });
+      playHandsFreeSoundIfEligible();
     }
     return snapshotState();
   }
 
   const sessionId = getNextDictationSessionId();
+  currentDictationStartedAt = Date.now();
   setOverlayAudioLevel(0);
   setState({
     captureMode,
@@ -779,6 +882,11 @@ function startListening(mode = 'hold') {
     notice: captureMode === 'hands-free' ? HANDS_FREE_ACTIVE_NOTICE : clearHandsFreeNotice(),
     error: '',
   });
+  if (Date.now() >= suppressStartSoundUntil) {
+    sendOverlayFeedback('play-sound', { sound: 'start', interrupt: true });
+  }
+  suppressStartSoundUntil = 0;
+  suppressStartRequestsUntil = 0;
   engageCaptureMute();
   sendServiceCommand('start', { session_id: sessionId });
   return snapshotState();
@@ -786,6 +894,9 @@ function startListening(mode = 'hold') {
 
 function stopListening() {
   const nextNotice = clearHandsFreeNotice();
+  const hadLiveCapture =
+    state.captureMode !== null || state.listening || state.dictationSessionId !== null;
+  resetDictationFeedbackState();
   releaseCaptureMute();
 
   if (!state.listening && !state.pendingStartMode && state.dictationSessionId === null) {
@@ -812,6 +923,9 @@ function stopListening() {
     captureMode: null,
     notice: nextNotice,
   });
+  if (hadLiveCapture) {
+    sendOverlayFeedback('play-sound', { sound: 'close', interrupt: true });
+  }
   setOverlayAudioLevel(0);
   if (state.dictationSessionId !== null) {
     sendServiceCommand('stop', { session_id: state.dictationSessionId });
@@ -834,6 +948,7 @@ function cancelDictation(source = 'escape') {
   const nextNotice =
     source === 'escape' ? 'Ditado cancelado por Esc.' : 'Ditado cancelado.';
   const sessionId = state.dictationSessionId;
+  resetDictationFeedbackState();
 
   setState({
     hotkeyPressed: false,
@@ -849,6 +964,7 @@ function cancelDictation(source = 'escape') {
   });
   setOverlayAudioLevel(0);
   releaseCaptureMute();
+  sendOverlayFeedback('play-sound', { sound: 'cancel', interrupt: true });
 
   if (state.serviceOnline && state.engineReady && sessionId !== null) {
     sendServiceCommand('cancel', { session_id: sessionId });
@@ -913,6 +1029,7 @@ async function handleServiceEvent(event) {
     case 'ready':
       {
         const pendingStartMode = state.pendingStartMode;
+        const shouldPlayLoadedFeedback = !hasPlayedLoadedFeedback;
         setOverlayAudioLevel(0);
         setState({
           engineReady: true,
@@ -929,6 +1046,12 @@ async function handleServiceEvent(event) {
               : state.notice,
           error: '',
         });
+        if (shouldPlayLoadedFeedback) {
+          hasPlayedLoadedFeedback = true;
+          sendOverlayFeedback('loaded-ready', {
+            sound: 'loaded',
+          });
+        }
         if (pendingStartMode === 'hands-free' || (pendingStartMode === 'hold' && state.hotkeyPressed)) {
           startListening(pendingStartMode);
         }
@@ -1026,6 +1149,7 @@ async function handleServiceEvent(event) {
       classifyWarning(payload.message || 'Aviso do motor de ditado.');
       break;
     case 'error':
+      resetDictationFeedbackState();
       releaseCaptureMute();
       setState({
         notice: '',
@@ -1059,10 +1183,14 @@ function handleHotkeyEvent(event) {
         hotkeyPressed: true,
       });
       if (state.captureMode === 'hands-free' || state.pendingStartMode === 'hands-free') {
+        suppressStartSoundUntil = Date.now() + 1200;
+        suppressStartRequestsUntil = Date.now() + 450;
+        ignoreNextHotkeyRelease = true;
         stopListening();
         break;
       }
 
+      ignoreNextHotkeyRelease = false;
       startListening(hotkeyMode);
       break;
     case 'hotkey-mode-changed':
@@ -1072,6 +1200,10 @@ function handleHotkeyEvent(event) {
       setState({
         hotkeyPressed: false,
       });
+      if (ignoreNextHotkeyRelease) {
+        ignoreNextHotkeyRelease = false;
+        break;
+      }
       if (state.captureMode === 'hands-free' || state.pendingStartMode === 'hands-free') {
         break;
       }
@@ -1108,6 +1240,7 @@ function handleAudioControllerEvent(event) {
 
   switch (event.type) {
     case 'ready':
+      syncAudioControllerConfig();
       break;
     case 'warning':
       if (message) {
@@ -1429,6 +1562,7 @@ async function shutdownServiceForRestart() {
 
 async function restartDictationService() {
   const restartVersion = ++serviceRestartVersion;
+  resetDictationFeedbackState();
   releaseCaptureMute();
   setState({
     engineReady: false,
@@ -1458,10 +1592,15 @@ async function applySettings(patch) {
   const nextModel = patch.model ? normalizeModel(patch.model) : state.model;
   const nextShowOverlayBar =
     typeof patch.showOverlayBar === 'boolean' ? patch.showOverlayBar : state.showOverlayBar;
+  const nextSoundEffectsEnabled =
+    typeof patch.soundEffectsEnabled === 'boolean'
+      ? patch.soundEffectsEnabled
+      : state.soundEffectsEnabled;
 
   const modelChanged = nextModel !== state.model;
   const languagesChanged = nextLanguages.join(',') !== state.allowedLanguages.join(',');
   const overlayChanged = nextShowOverlayBar !== state.showOverlayBar;
+  const soundEffectsChanged = nextSoundEffectsEnabled !== state.soundEffectsEnabled;
 
   let notice = state.notice;
   if (languagesChanged) {
@@ -1472,12 +1611,17 @@ async function applySettings(patch) {
     notice = nextShowOverlayBar
       ? 'Barra flutuante ativada.'
       : 'Barra flutuante desativada.';
+  } else if (soundEffectsChanged) {
+    notice = nextSoundEffectsEnabled
+      ? 'Feedback sonoro ativado.'
+      : 'Feedback sonoro desativado.';
   }
 
   setState({
     allowedLanguages: nextLanguages,
     model: nextModel,
     showOverlayBar: nextShowOverlayBar,
+    soundEffectsEnabled: nextSoundEffectsEnabled,
     notice,
     error: '',
   });
@@ -1510,6 +1654,7 @@ ipcMain.handle('copy-text', async (_event, text) => {
 });
 
 function shutdownChildren() {
+  resetDictationFeedbackState();
   releaseCaptureMute();
 
   try {
@@ -1552,6 +1697,7 @@ app.whenReady().then(() => {
     history: persistedState.history,
     usageStats: persistedState.usageStats,
     showOverlayBar: persistedState.preferences.showOverlayBar,
+    soundEffectsEnabled: persistedState.preferences.soundEffectsEnabled,
     overlayPosition: defaults.overlayPosition,
   });
 
