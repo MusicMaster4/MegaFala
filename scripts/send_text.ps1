@@ -56,6 +56,7 @@ try {
   } | Out-Null
   Start-Sleep -Milliseconds 120
   [System.Windows.Forms.SendKeys]::SendWait('^v')
+  [Console]::Out.WriteLine('__MEGAFALA_PASTE_OK__')
   Start-Sleep -Milliseconds 220
 } finally {
   try {

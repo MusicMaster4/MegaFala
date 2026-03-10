@@ -28,6 +28,8 @@ const DEFAULT_LAUNCH_AT_LOGIN = true;
 const PERSISTENCE_VERSION = 5;
 const SERVICE_SHUTDOWN_TIMEOUT_MS = 2500;
 const HANDS_FREE_SOUND_DELAY_MS = 250;
+const WINDOWS_PASTE_READY_SIGNAL = '__MEGAFALA_PASTE_OK__';
+const WINDOWS_PASTE_TIMEOUT_MS = 4000;
 const OVERLAY_WIDTH = 96;
 const OVERLAY_HEIGHT = 34;
 const OVERLAY_MARGIN_BOTTOM = 22;
@@ -1136,6 +1138,7 @@ function syncOverlayWindow() {
   }
 
   positionOverlayWindow();
+  overlayWindow.setSkipTaskbar(true);
 
   if (state.showOverlayBar) {
     if (!overlayWindow.isVisible()) {
@@ -1174,11 +1177,24 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.setIgnoreMouseEvents(false);
+  overlayWindow.setSkipTaskbar(true);
   overlayWindow.setMenuBarVisibility(false);
   overlayWindow.loadFile(path.join(getProjectRoot(), 'src', 'renderer', 'overlay.html'));
   overlayWindow.webContents.on('did-finish-load', () => {
     flushPendingOverlayFeedbacks();
     syncAudioControllerConfig();
+  });
+  overlayWindow.on('show', () => {
+    overlayWindow.setSkipTaskbar(true);
+  });
+  overlayWindow.on('close', (event) => {
+    if (isQuitting) {
+      return;
+    }
+
+    event.preventDefault();
+    overlayWindow.setSkipTaskbar(true);
+    syncOverlayWindow();
   });
 
   overlayWindow.on('ready-to-show', () => {
@@ -1239,6 +1255,8 @@ function showMainWindow(options = {}) {
     mainWindow.show();
   }
 
+  mainWindow.setSkipTaskbar(false);
+
   if (focus) {
     mainWindow.focus();
   }
@@ -1251,6 +1269,7 @@ function hideMainWindow() {
     return;
   }
 
+  mainWindow.setSkipTaskbar(true);
   mainWindow.hide();
 
   if (process.platform === 'darwin' && app.dock) {
@@ -1524,23 +1543,77 @@ function insertTextIntoFocusedApp(text) {
     );
 
     let stderr = '';
+    let stdout = '';
+    let settled = false;
+    let pasteTimeout = null;
+
+    const cleanup = () => {
+      if (pasteTimeout) {
+        clearTimeout(pasteTimeout);
+        pasteTimeout = null;
+      }
+    };
+
+    const resolveOnce = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      resolve();
+    };
+
+    const rejectOnce = (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    if (powershell.stdout) {
+      powershell.stdout.setEncoding('utf8');
+      powershell.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+        if (stdout.includes(WINDOWS_PASTE_READY_SIGNAL)) {
+          resolveOnce();
+        }
+      });
+    }
 
     powershell.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
 
     powershell.on('error', (error) => {
-      reject(error);
+      rejectOnce(error);
     });
 
     powershell.on('close', (code) => {
-      if (code === 0) {
-        resolve();
+      if (settled) {
         return;
       }
 
-      reject(new Error(stderr || `PowerShell exited with code ${code}`));
+      if (code === 0) {
+        resolveOnce();
+        return;
+      }
+
+      rejectOnce(new Error(stderr || `PowerShell exited with code ${code}`));
     });
+
+    pasteTimeout = setTimeout(() => {
+      try {
+        powershell.kill();
+      } catch (_error) {
+        // Best effort.
+      }
+
+      rejectOnce(new Error('Tempo limite excedido ao colar o texto no app ativo.'));
+    }, WINDOWS_PASTE_TIMEOUT_MS);
   });
 }
 
