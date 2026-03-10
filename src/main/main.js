@@ -24,8 +24,8 @@ const DEFAULT_LANGUAGES = ['pt', 'en'];
 const DEFAULT_INTERFACE_LANGUAGE = 'en';
 const DEFAULT_SHOW_OVERLAY_BAR = true;
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
-const DEFAULT_LAUNCH_AT_LOGIN = false;
-const PERSISTENCE_VERSION = 4;
+const DEFAULT_LAUNCH_AT_LOGIN = true;
+const PERSISTENCE_VERSION = 5;
 const SERVICE_SHUTDOWN_TIMEOUT_MS = 2500;
 const OVERLAY_WIDTH = 96;
 const OVERLAY_HEIGHT = 34;
@@ -958,6 +958,7 @@ function normalizePersistedState(payload) {
   const source = payload && typeof payload === 'object' ? payload : {};
   const preferencesSource =
     source.preferences && typeof source.preferences === 'object' ? source.preferences : source;
+  const shouldEnableLaunchAtLoginByDefault = Number(source.version) < PERSISTENCE_VERSION;
 
   return {
     version: PERSISTENCE_VERSION,
@@ -974,7 +975,7 @@ function normalizePersistedState(payload) {
           ? preferencesSource.soundEffectsEnabled
           : defaults.soundEffectsEnabled,
       launchAtLogin:
-        typeof preferencesSource.launchAtLogin === 'boolean'
+        typeof preferencesSource.launchAtLogin === 'boolean' && !shouldEnableLaunchAtLoginByDefault
           ? preferencesSource.launchAtLogin
           : defaults.launchAtLogin,
       dictionaryEntries: normalizeDictionaryEntries(preferencesSource.dictionaryEntries),
@@ -2185,6 +2186,10 @@ function handleAudioControllerEvent(event) {
 }
 
 function attachJsonReader(childProcess, onEvent, onInvalidJson) {
+  if (childProcess.stdout) {
+    childProcess.stdout.setEncoding('utf8');
+  }
+
   const reader = readline.createInterface({
     input: childProcess.stdout,
     crlfDelay: Infinity,
@@ -2203,6 +2208,16 @@ function attachJsonReader(childProcess, onEvent, onInvalidJson) {
   });
 
   return reader;
+}
+
+function configureTextPipes(childProcess) {
+  if (childProcess.stdout) {
+    childProcess.stdout.setEncoding('utf8');
+  }
+
+  if (childProcess.stderr) {
+    childProcess.stderr.setEncoding('utf8');
+  }
 }
 
 function unregisterPasteLastShortcut() {
@@ -2266,6 +2281,7 @@ function bootAudioController() {
     },
   );
 
+  configureTextPipes(localProcess);
   audioProcess = localProcess;
   audioReader = attachJsonReader(
     localProcess,
@@ -2288,7 +2304,7 @@ function bootAudioController() {
       return;
     }
 
-    const message = chunk.toString().trim();
+    const message = String(chunk || '').trim();
     if (message) {
       console.warn('[audio-mute]', message);
     }
@@ -2322,6 +2338,7 @@ function bootDictationService() {
     windowsHide: true,
   });
 
+  configureTextPipes(localProcess);
   serviceProcess = localProcess;
   setOverlayAudioLevel(0);
   setState({
@@ -2361,7 +2378,7 @@ function bootDictationService() {
       return;
     }
 
-    const message = chunk.toString().trim();
+    const message = String(chunk || '').trim();
     if (!message) {
       return;
     }
@@ -2429,6 +2446,7 @@ function bootHotkeyListener() {
     windowsHide: true,
   });
 
+  configureTextPipes(localProcess);
   hotkeyProcess = localProcess;
   hotkeyReader = attachJsonReader(
     localProcess,
@@ -2453,7 +2471,7 @@ function bootHotkeyListener() {
       return;
     }
 
-    const message = chunk.toString().trim();
+    const message = String(chunk || '').trim();
     if (!message) {
       return;
     }

@@ -36,8 +36,7 @@ const TRANSLATIONS = {
     showOverlay: 'Show global overlay',
     showOverlayCopy: 'Display the recording indicator above any app.',
     startWithComputer: 'Start with the computer',
-    startWithComputerCopy:
-      'Launch MegaFala in the background when you sign in. The tray icon and floating bar stay ready.',
+    startWithComputerCopy: 'Launch MegaFala in the background when you sign in.',
     soundEffects: 'Sound feedback',
     soundEffectsCopy: 'Play sounds on load, start, stop, cancel, and hands-free activation.',
     detectionLanguages: 'Detection languages',
@@ -114,8 +113,7 @@ const TRANSLATIONS = {
     showOverlay: 'Exibir overlay global',
     showOverlayCopy: 'Mostra o indicador de gravação acima de qualquer app.',
     startWithComputer: 'Iniciar com o computador',
-    startWithComputerCopy:
-      'Abre o MegaFala em segundo plano ao entrar no sistema. O icone na bandeja e a barra flutuante ficam prontos.',
+    startWithComputerCopy: 'Abre o MegaFala em segundo plano ao entrar no sistema.',
     soundEffects: 'Sons de feedback',
     soundEffectsCopy: 'Toca sons ao carregar, iniciar, encerrar, cancelar e ativar hands-free.',
     detectionLanguages: 'Idiomas de detecção',

@@ -6,6 +6,7 @@ import site
 import sys
 import threading
 import time
+import io
 from collections import deque
 from pathlib import Path
 from typing import Optional
@@ -92,6 +93,37 @@ load_dotenv()
 
 DEFAULT_ALLOWED_LANGUAGES = ("pt", "en")
 SUPPORTED_LANGUAGES = tuple(dict.fromkeys(_LANGUAGE_CODES))
+
+
+def _configure_stdio() -> None:
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+            continue
+        except (AttributeError, ValueError):
+            pass
+
+        buffer = getattr(stream, "buffer", None)
+        if buffer is None:
+            continue
+
+        setattr(
+            sys,
+            stream_name,
+            io.TextIOWrapper(
+                buffer,
+                encoding="utf-8",
+                errors="replace",
+                line_buffering=stream_name != "stdin",
+            ),
+        )
+
+
+_configure_stdio()
 
 
 def normalize_languages(values) -> list[str]:
