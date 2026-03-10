@@ -24,6 +24,19 @@ def _candidate_cuda_dirs() -> list[Path]:
         if key == "CUDA_PATH" or key.startswith("CUDA_PATH_V"):
             candidates.append(Path(value) / "bin")
 
+    runtime_roots = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        runtime_roots.append(Path(meipass))
+
+    executable_parent = Path(sys.executable).resolve().parent
+    runtime_roots.extend((executable_parent, executable_parent / "_internal"))
+
+    for runtime_root in runtime_roots:
+        candidates.append(runtime_root / "nvidia" / "cublas" / "bin")
+        candidates.append(runtime_root / "nvidia" / "cudnn" / "bin")
+        candidates.append(runtime_root / "ctranslate2")
+
     prefixes = {
         Path(sys.prefix),
         Path(sys.base_prefix),

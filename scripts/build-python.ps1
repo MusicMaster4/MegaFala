@@ -38,7 +38,21 @@ $commonArgs = @(
   '--additional-hooks-dir', (Join-Path $PSScriptRoot 'pyinstaller-hooks')
 )
 
-& $pythonExe @commonArgs `
+$cudaCollectArgs = @()
+$optionalCollectModules = @(
+  'nvidia.cublas',
+  'nvidia.cudnn',
+  'nvidia.cuda_runtime'
+)
+
+foreach ($module in $optionalCollectModules) {
+  & $pythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$module') else 1)"
+  if ($LASTEXITCODE -eq 0) {
+    $cudaCollectArgs += @('--collect-all', $module)
+  }
+}
+
+& $pythonExe @commonArgs @cudaCollectArgs `
   '--name' 'dictation_service' `
   '--hidden-import' 'sounddevice' `
   '--collect-all' 'faster_whisper' `
