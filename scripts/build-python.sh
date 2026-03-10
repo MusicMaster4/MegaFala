@@ -33,7 +33,7 @@ COMMON_ARGS=(
   --additional-hooks-dir "$HOOKS_PATH"
 )
 
-CudaArgs=()
+CUDA_ARGS=()
 
 has_python_module() {
   "$PYTHON_EXE" -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$1') else 1)" >/dev/null 2>&1
@@ -41,7 +41,7 @@ has_python_module() {
 
 for module in nvidia.cublas nvidia.cudnn nvidia.cuda_runtime; do
   if has_python_module "$module"; then
-    CudaArgs+=(--collect-all "$module")
+    CUDA_ARGS+=(--collect-all "$module")
   fi
 done
 
@@ -49,7 +49,12 @@ if [[ "$OSTYPE" == darwin* && -n "$TARGET_ARCH" ]]; then
   COMMON_ARGS+=(--target-arch "$TARGET_ARCH")
 fi
 
-"$PYTHON_EXE" "${COMMON_ARGS[@]}" "${CudaArgs[@]}" \
+DICTATION_ARGS=("${COMMON_ARGS[@]}")
+if ((${#CUDA_ARGS[@]} > 0)); then
+  DICTATION_ARGS+=("${CUDA_ARGS[@]}")
+fi
+
+"$PYTHON_EXE" "${DICTATION_ARGS[@]}" \
   --name dictation_service \
   --collect-all faster_whisper \
   --collect-all ctranslate2 \

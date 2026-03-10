@@ -33,26 +33,48 @@ function run(command, args) {
 }
 
 function findLatestRceditBinary() {
+  const searchRoots = [];
+  const customCacheDir = process.env.ELECTRON_BUILDER_CACHE;
   const localAppData = process.env.LOCALAPPDATA;
-  if (!localAppData) {
-    return null;
+
+  if (customCacheDir) {
+    searchRoots.push(customCacheDir);
+  }
+  if (localAppData) {
+    searchRoots.push(path.join(localAppData, 'electron-builder', 'Cache'));
   }
 
-  const cacheDir = path.join(localAppData, 'electron-builder', 'Cache', 'winCodeSign');
-  if (!fs.existsSync(cacheDir)) {
-    return null;
+  const candidates = [];
+
+  for (const rootDir of searchRoots) {
+    const cacheDir = path.join(rootDir, 'winCodeSign');
+    if (!fs.existsSync(cacheDir)) {
+      continue;
+    }
+
+    const stack = [cacheDir];
+    while (stack.length > 0) {
+      const currentDir = stack.pop();
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(fullPath);
+          continue;
+        }
+
+        if (entry.isFile() && entry.name.toLowerCase() === rceditBinaryName.toLowerCase()) {
+          candidates.push({
+            candidate: fullPath,
+            mtimeMs: fs.statSync(fullPath).mtimeMs,
+          });
+        }
+      }
+    }
   }
 
-  const candidates = fs
-    .readdirSync(cacheDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(cacheDir, entry.name, rceditBinaryName))
-    .filter((candidate) => fs.existsSync(candidate))
-    .map((candidate) => ({
-      candidate,
-      mtimeMs: fs.statSync(candidate).mtimeMs,
-    }))
-    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  candidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
 
   return candidates[0]?.candidate || null;
 }
@@ -76,21 +98,20 @@ async function main() {
 
   const rceditPath = findLatestRceditBinary();
   if (!rceditPath) {
-    console.error(`Unable to locate ${rceditBinaryName} in the electron-builder cache.`);
-    process.exit(1);
+    console.warn(`Unable to locate ${rceditBinaryName} in the electron-builder cache. Skipping rcedit metadata patch.`);
+  } else {
+    run(rceditPath, [
+      executablePath,
+      '--set-version-string',
+      'FileDescription',
+      productName,
+      '--set-version-string',
+      'ProductName',
+      productName,
+      '--set-icon',
+      iconPath,
+    ]);
   }
-
-  run(rceditPath, [
-    executablePath,
-    '--set-version-string',
-    'FileDescription',
-    productName,
-    '--set-version-string',
-    'ProductName',
-    productName,
-    '--set-icon',
-    iconPath,
-  ]);
 
   run(process.execPath, [
     electronBuilderCli,
