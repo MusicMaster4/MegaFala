@@ -210,12 +210,7 @@ h1, h2, h3 {
 .status-panel__copy strong {
   display: block;
   font-size: 0.96rem;
-  margin-bottom: 6px;
-}
-
-.status-panel__copy p {
-  margin: 0;
-  line-height: 1.45;
+  margin-bottom: 0;
 }
 
 .status-panel__progress {
@@ -234,22 +229,8 @@ h1, h2, h3 {
   width: 38%;
   border-radius: inherit;
   background: var(--text);
-  opacity: 0.88;
-  animation: status-progress 1.15s ease-in-out infinite;
-}
-
-.status-panel__note {
-  margin-top: 10px !important;
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
-.status-panel--loading .status-panel__icon {
-  border-color: rgba(245, 158, 11, 0.28);
-}
-
-.status-panel--loading .status-panel__progress span {
-  background: var(--transcribing);
+  opacity: 1;
+  animation: status-progress 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 .status-panel--error {

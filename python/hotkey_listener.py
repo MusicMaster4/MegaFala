@@ -20,6 +20,7 @@ class HotkeyListener:
         self.stop_event = threading.Event()
         self.is_pressed = False
         self.paste_last_active = False
+        self.paste_last_pending_emit = False
         self.active_mode = "hold"
         self.state_lock = threading.Lock()
         self.listener = None
@@ -53,6 +54,7 @@ class HotkeyListener:
             self.listener.stop()
         self.is_pressed = False
         self.paste_last_active = False
+        self.paste_last_pending_emit = False
         self.active_mode = "hold"
         self.pressed_tokens.clear()
         self.listener = None
@@ -166,9 +168,16 @@ class HotkeyListener:
 
             if paste_last_active and not self.paste_last_active:
                 self.paste_last_active = True
-                self.emit("paste-last-requested", {"shortcut": self.paste_last_hotkey})
+                self.paste_last_pending_emit = True
             elif not paste_last_active and self.paste_last_active:
                 self.paste_last_active = False
+
+            # Only trigger the paste-after-history shortcut after every key from
+            # that shortcut has been released, avoiding modifier leakage such as
+            # Ctrl/Alt still being held when the app injects Ctrl+V.
+            if self.paste_last_pending_emit and not (self.paste_last_tokens & self.pressed_tokens):
+                self.paste_last_pending_emit = False
+                self.emit("paste-last-requested", {"shortcut": self.paste_last_hotkey})
 
             if combo_active and not self.is_pressed:
                 self.is_pressed = True

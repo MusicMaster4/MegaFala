@@ -1,0 +1,103 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: macOS ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Intel
+            runner: macos-15-intel
+            electron_arch: x64
+            pyinstaller_arch: x86_64
+          - name: Apple-Silicon
+            runner: macos-15
+            electron_arch: arm64
+            pyinstaller_arch: arm64
+
+    env:
+      PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstaller_arch }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r python/requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Validate JavaScript
+        run: npm run check
+
+      - name: Ensure build script is executable
+        run: chmod +x ./scripts/build-python.sh
+
+      - name: Build macOS package
+        run: npm run dist:mac:${{ matrix.electron_arch }}
+
+      - name: Verify packaged binary architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$(find dist -maxdepth 2 -name 'MegaFala.app' -print -quit)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "MegaFala.app nao encontrado em dist/"
+            exit 1
+          fi
+
+          EXPECTED_ARCH="${{ matrix.pyinstaller_arch }}"
+          BINARIES=(
+            "$APP_PATH/Contents/MacOS/MegaFala"
+            "$APP_PATH/Contents/Resources/bin/dictation_service/dictation_service"
+            "$APP_PATH/Contents/Resources/bin/hotkey_listener/hotkey_listener"
+          )
+
+          for BINARY in "${BINARIES[@]}"; do
+            ACTUAL_ARCHES="$(lipo -archs "$BINARY")"
+            echo "$BINARY -> $ACTUAL_ARCHES"
+            if [[ "$ACTUAL_ARCHES" != *"$EXPECTED_ARCH"* ]]; then
+              echo "Arquitetura inesperada para $BINARY"
+              exit 1
+            fi
+          done
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shasum -a 256 dist/*.dmg dist/*.zip > "dist/SHA256SUMS-macos-${{ matrix.electron_arch }}.txt"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: megafala-macos-${{ matrix.electron_arch }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS-macos-${{ matrix.electron_arch }}.txt
+          if-no-files-found: error

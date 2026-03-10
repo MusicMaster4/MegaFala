@@ -2,13 +2,14 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(process.cwd(), '.env') });
 
-const { app, BrowserWindow, clipboard, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, screen } = require('electron');
 const { spawn } = require('child_process');
 const readline = require('readline');
 
 const DEFAULT_SHORTCUT = process.platform === 'darwin' ? 'ctrl+command' : 'ctrl+windows';
 const DEFAULT_PASTE_LAST_SHORTCUT =
   process.platform === 'darwin' ? 'command+option+v' : 'ctrl+alt+v';
+const PASTE_SHORTCUT_SETTLE_DELAY_MS = process.platform === 'darwin' ? 90 : 70;
 const DEFAULT_LANGUAGES = ['pt', 'en'];
 const DEFAULT_INTERFACE_LANGUAGE = 'en';
 const DEFAULT_SHOW_OVERLAY_BAR = true;
@@ -189,6 +190,7 @@ const MAIN_TRANSLATIONS = {
     waitingSwitchHold: 'Switching to {model}. Wait for the new worker to finish loading.',
     waitingBootHandsFree: 'The model is still loading. Hands-free mode will start when it is ready.',
     waitingBootHold: 'The model is still loading. Wait a few seconds.',
+    transcriptionBusy: 'Wait for the current transcription to finish before starting a new dictation.',
   },
   'pt-BR': {
     activeLanguages: 'Idiomas de deteccao: {summary}.',
@@ -208,6 +210,8 @@ const MAIN_TRANSLATIONS = {
     waitingBootHandsFree:
       'O modelo ainda esta carregando. O modo hands-free sera iniciado quando estiver pronto.',
     waitingBootHold: 'O modelo ainda esta carregando. Aguarde alguns segundos.',
+    transcriptionBusy:
+      'Aguarde a transcricao atual terminar antes de iniciar um novo ditado.',
   },
 };
 
@@ -224,8 +228,12 @@ let hotkeyToken = 0;
 let audioToken = 0;
 let serviceRestartVersion = 0;
 let hasPlayedLoadedFeedback = false;
+let pasteLastRegisteredAccelerator = null;
+let pasteLastRegisteredViaElectron = false;
+let lastPasteLastRequestAt = 0;
 const pendingOverlayFeedbacks = [];
 let currentDictationStartedAt = 0;
+let captureMuteDepth = 0;
 let suppressStartSoundUntil = 0;
 let suppressStartRequestsUntil = 0;
 let ignoreNextHotkeyRelease = false;
@@ -653,6 +661,54 @@ function getShortcutFromEnv(name, fallback) {
   return value || fallback;
 }
 
+function shortcutToElectronAccelerator(shortcut) {
+  const tokens = String(shortcut || '')
+    .split('+')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return '';
+  }
+
+  const acceleratorTokens = tokens.map((token) => {
+    switch (token) {
+      case 'commandorcontrol':
+      case 'control':
+      case 'ctrl':
+        return 'CommandOrControl';
+      case 'command':
+      case 'cmd':
+        return 'Command';
+      case 'option':
+        return 'Option';
+      case 'alt':
+        return process.platform === 'darwin' ? 'Option' : 'Alt';
+      case 'windows':
+      case 'super':
+        return 'Super';
+      case 'shift':
+        return 'Shift';
+      case 'space':
+        return 'Space';
+      case 'escape':
+      case 'esc':
+        return 'Esc';
+      case 'enter':
+      case 'return':
+        return 'Enter';
+      default:
+        return token.length === 1 ? token.toUpperCase() : '';
+    }
+  });
+
+  if (acceleratorTokens.some((token) => !token)) {
+    return '';
+  }
+
+  return acceleratorTokens.join('+');
+}
+
 function getDefaultsFromEnv() {
   return {
     shortcut: getShortcutFromEnv('FLOW_HOTKEY', DEFAULT_SHORTCUT),
@@ -733,10 +789,14 @@ function getPythonBin() {
   return process.env.PYTHON_BIN || (fs.existsSync(venvPython) ? venvPython : 'python');
 }
 
+function getWorkerExecutableName(workerName) {
+  return process.platform === 'win32' ? `${workerName}.exe` : workerName;
+}
+
 function getWorkerLaunchSpec(workerName) {
   if (app.isPackaged) {
     return {
-      command: path.join(getRuntimeBasePath(), 'bin', workerName, `${workerName}.exe`),
+      command: path.join(getRuntimeBasePath(), 'bin', workerName, getWorkerExecutableName(workerName)),
       args: [],
     };
   }
@@ -1174,6 +1234,14 @@ function isCurrentDictationSession(sessionId) {
   return sessionId === null || sessionId === state.dictationSessionId;
 }
 
+function hasOngoingTranscription() {
+  return (
+    state.phase === 'transcribing' ||
+    state.pendingPaste ||
+    (state.dictationSessionId !== null && !state.listening)
+  );
+}
+
 function insertTextIntoFocusedApp(text) {
   return new Promise((resolve, reject) => {
     if (process.platform === 'darwin') {
@@ -1220,7 +1288,7 @@ function insertTextIntoFocusedApp(text) {
     const encodedText = Buffer.from(text, 'utf8').toString('base64');
     const powershell = spawn(
       'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-EncodedText', encodedText],
+      ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-EncodedText', encodedText],
       { windowsHide: true },
     );
 
@@ -1332,12 +1400,33 @@ function sendAudioCommand(type, payload = {}) {
 
 function engageCaptureMute() {
   if (process.platform === 'win32') {
+    captureMuteDepth += 1;
+    if (captureMuteDepth > 1) {
+      return;
+    }
     sendAudioCommand('capture-begin');
   }
 }
 
-function releaseCaptureMute() {
+function releaseCaptureMute(force = false) {
   if (process.platform === 'win32') {
+    if (force) {
+      const shouldNotify = captureMuteDepth > 0;
+      captureMuteDepth = 0;
+      if (shouldNotify) {
+        sendAudioCommand('capture-end');
+      }
+      return;
+    }
+
+    if (captureMuteDepth <= 0) {
+      return;
+    }
+
+    captureMuteDepth -= 1;
+    if (captureMuteDepth > 0) {
+      return;
+    }
     sendAudioCommand('capture-end');
   }
 }
@@ -1355,16 +1444,56 @@ function getLatestSavedTranscriptionText() {
   return '';
 }
 
-async function pasteLatestTranscription() {
-  const latestText = getLatestSavedTranscriptionText();
-  if (!latestText) {
-    setState({
-      error: 'Nenhuma transcricao salva disponivel para colar.',
-    });
+function getLatestPersistedTranscriptionText() {
+  try {
+    const persisted = loadPersistentState();
+    const latestHistoryEntry = persisted.history[0];
+    if (latestHistoryEntry && typeof latestHistoryEntry.text === 'string' && latestHistoryEntry.text.trim()) {
+      return latestHistoryEntry.text.trim();
+    }
+  } catch (_error) {
+    // Best effort fallback for the paste-last shortcut.
+  }
+
+  return '';
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function requestPasteLatestTranscription(source = 'unknown') {
+  const now = Date.now();
+  if (now - lastPasteLastRequestAt < 300) {
     return;
   }
 
+  lastPasteLastRequestAt = now;
+  void pasteLatestTranscription(source);
+}
+
+async function pasteLatestTranscription() {
+  const nextPhase = state.listening ? 'listening' : 'idle';
+
+  setOverlayAudioLevel(0);
+  setState({
+    pendingPaste: true,
+    phase: 'transcribing',
+    error: '',
+  });
+
   try {
+    await delay(PASTE_SHORTCUT_SETTLE_DELAY_MS);
+    const latestText = getLatestSavedTranscriptionText() || getLatestPersistedTranscriptionText();
+    if (!latestText) {
+      setState({
+        error: 'Nenhuma transcricao salva disponivel para colar.',
+      });
+      return;
+    }
+
     await insertTextIntoFocusedApp(normalizeTextForPaste(latestText));
     if (state.error === 'Nenhuma transcricao salva disponivel para colar.') {
       setState({
@@ -1374,6 +1503,11 @@ async function pasteLatestTranscription() {
   } catch (error) {
     setState({
       error: `Falha ao colar a ultima transcricao: ${error.message}`,
+    });
+  } finally {
+    setState({
+      pendingPaste: false,
+      phase: nextPhase,
     });
   }
 }
@@ -1389,6 +1523,16 @@ function startListening(mode = 'hold') {
     setState({
       pendingStartMode: captureMode,
       notice: getWaitingNotice(captureMode),
+      error: '',
+    });
+    return snapshotState();
+  }
+
+  if (hasOngoingTranscription()) {
+    releaseCaptureMute(true);
+    setState({
+      pendingStartMode: null,
+      notice: translateMain('transcriptionBusy'),
       error: '',
     });
     return snapshotState();
@@ -1431,7 +1575,7 @@ function stopListening() {
   const hadLiveCapture =
     state.captureMode !== null || state.listening || state.dictationSessionId !== null;
   resetDictationFeedbackState();
-  releaseCaptureMute();
+  releaseCaptureMute(true);
 
   if (!state.listening && !state.pendingStartMode && state.dictationSessionId === null) {
     setOverlayAudioLevel(0);
@@ -1497,7 +1641,7 @@ function cancelDictation(source = 'escape') {
     error: '',
   });
   setOverlayAudioLevel(0);
-  releaseCaptureMute();
+  releaseCaptureMute(true);
   sendOverlayFeedback('play-sound', { sound: 'cancel', interrupt: true });
 
   if (state.serviceOnline && state.engineReady && sessionId !== null) {
@@ -1682,7 +1826,7 @@ async function handleServiceEvent(event) {
       break;
     case 'error':
       resetDictationFeedbackState();
-      releaseCaptureMute();
+      releaseCaptureMute(true);
       setState({
         notice: '',
         error: payload.message || 'Erro no motor de ditado.',
@@ -1713,6 +1857,16 @@ function handleHotkeyEvent(event) {
       });
       break;
     case 'hotkey-pressed':
+      if (hasOngoingTranscription()) {
+        ignoreNextHotkeyRelease = true;
+        releaseCaptureMute(true);
+        setState({
+          hotkeyPressed: false,
+          notice: translateMain('transcriptionBusy'),
+          error: '',
+        });
+        break;
+      }
       setState({
         hotkeyPressed: true,
       });
@@ -1754,7 +1908,9 @@ function handleHotkeyEvent(event) {
       cancelDictation(payload.source || 'escape');
       break;
     case 'paste-last-requested':
-      void pasteLatestTranscription();
+      if (!pasteLastRegisteredViaElectron) {
+        requestPasteLatestTranscription('python-hotkey-listener');
+      }
       break;
     case 'warning':
       classifyWarning(payload.message || state.notice);
@@ -1775,6 +1931,9 @@ function handleAudioControllerEvent(event) {
   switch (event.type) {
     case 'ready':
       syncAudioControllerConfig();
+      if (captureMuteDepth > 0) {
+        sendAudioCommand('capture-begin');
+      }
       break;
     case 'warning':
       if (message) {
@@ -1808,6 +1967,50 @@ function attachJsonReader(childProcess, onEvent, onInvalidJson) {
   });
 
   return reader;
+}
+
+function unregisterPasteLastShortcut() {
+  if (pasteLastRegisteredAccelerator) {
+    globalShortcut.unregister(pasteLastRegisteredAccelerator);
+    pasteLastRegisteredAccelerator = null;
+  }
+
+  pasteLastRegisteredViaElectron = false;
+}
+
+function registerPasteLastShortcut() {
+  unregisterPasteLastShortcut();
+
+  const accelerator = shortcutToElectronAccelerator(state.pasteLastShortcut);
+  if (!accelerator) {
+    setState({
+      error: `Atalho invalido para colar a ultima transcricao: ${state.pasteLastShortcut}`,
+    });
+    return false;
+  }
+
+  try {
+    const registered = globalShortcut.register(accelerator, () => {
+      requestPasteLatestTranscription('electron-global-shortcut');
+    });
+
+    pasteLastRegisteredViaElectron = registered;
+    if (!registered) {
+      setState({
+        error: `Nao foi possivel registrar o atalho global ${state.pasteLastShortcut} para colar a ultima transcricao.`,
+      });
+      return false;
+    }
+
+    pasteLastRegisteredAccelerator = accelerator;
+    return true;
+  } catch (error) {
+    pasteLastRegisteredViaElectron = false;
+    setState({
+      error: `Falha ao registrar o atalho ${state.pasteLastShortcut}: ${error.message}`,
+    });
+    return false;
+  }
 }
 
 function bootAudioController() {
@@ -1946,7 +2149,7 @@ function bootDictationService() {
     }
 
     setOverlayAudioLevel(0);
-    releaseCaptureMute();
+    releaseCaptureMute(true);
     setState({
       serviceOnline: false,
       engineReady: false,
@@ -1965,7 +2168,7 @@ function bootDictationService() {
 
     serviceProcess = null;
     setOverlayAudioLevel(0);
-    releaseCaptureMute();
+    releaseCaptureMute(true);
     setState({
       serviceOnline: false,
       engineReady: false,
@@ -2097,7 +2300,7 @@ async function shutdownServiceForRestart() {
 async function restartDictationService() {
   const restartVersion = ++serviceRestartVersion;
   resetDictationFeedbackState();
-  releaseCaptureMute();
+  releaseCaptureMute(true);
   setState({
     engineReady: false,
     serviceOnline: false,
@@ -2232,7 +2435,7 @@ ipcMain.handle('copy-text', async (_event, text) => {
 
 function shutdownChildren() {
   resetDictationFeedbackState();
-  releaseCaptureMute();
+  releaseCaptureMute(true);
 
   try {
     sendServiceCommand('shutdown');
@@ -2281,6 +2484,7 @@ app.whenReady().then(() => {
     overlayPosition: defaults.overlayPosition,
   });
   rebuildDictionaryReplacementIndex(persistedState.preferences.dictionaryEntries);
+  registerPasteLastShortcut();
 
   createWindow();
   createOverlayWindow();
@@ -2303,6 +2507,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  unregisterPasteLastShortcut();
   shutdownChildren();
 });
 

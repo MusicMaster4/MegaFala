@@ -9,7 +9,9 @@
     "check": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/overlay-preload.js && node --check src/renderer/renderer.js && node --check src/renderer/overlay.js",
     "build:python": "node scripts/build-python.js",
     "dist:win": "npm run build:python && electron-builder --win nsis",
-    "dist:mac": "npm run build:python && electron-builder --mac dmg zip"
+    "dist:mac": "npm run build:python && electron-builder --mac dmg zip",
+    "dist:mac:x64": "npm run build:python && electron-builder --mac dmg zip --x64",
+    "dist:mac:arm64": "npm run build:python && electron-builder --mac dmg zip --arm64"
   },
   "build": {
     "appId": "com.megafala.app",

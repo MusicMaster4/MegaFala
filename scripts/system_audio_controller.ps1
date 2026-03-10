@@ -1,3 +1,7 @@
+param(
+    [switch]$RecoverAudio
+)
+
 $ErrorActionPreference = 'Stop'
 
 $coreAudioType = @"
@@ -90,6 +94,30 @@ namespace MegaFala.Audio
         int GetMasterVolume(out float level);
         int SetMute([MarshalAs(UnmanagedType.Bool)] bool isMuted, ref Guid eventContext);
         int GetMute(out bool isMuted);
+    }
+
+    [Guid("5CDF2C82-841E-4546-9722-0CF74078229A")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IAudioEndpointVolume
+    {
+        int RegisterControlChangeNotify(IntPtr notify);
+        int UnregisterControlChangeNotify(IntPtr notify);
+        int GetChannelCount(out uint channelCount);
+        int SetMasterVolumeLevel(float levelDb, ref Guid eventContext);
+        int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
+        int GetMasterVolumeLevel(out float levelDb);
+        int GetMasterVolumeLevelScalar(out float level);
+        int SetChannelVolumeLevel(uint channelNumber, float levelDb, ref Guid eventContext);
+        int SetChannelVolumeLevelScalar(uint channelNumber, float level, ref Guid eventContext);
+        int GetChannelVolumeLevel(uint channelNumber, out float levelDb);
+        int GetChannelVolumeLevelScalar(uint channelNumber, out float level);
+        int SetMute([MarshalAs(UnmanagedType.Bool)] bool isMuted, ref Guid eventContext);
+        int GetMute(out bool isMuted);
+        int GetVolumeStepInfo(out uint step, out uint stepCount);
+        int VolumeStepUp(ref Guid eventContext);
+        int VolumeStepDown(ref Guid eventContext);
+        int QueryHardwareSupport(out uint hardwareSupportMask);
+        int GetVolumeRange(out float volumeMindB, out float volumeMaxdB, out float volumeIncrementdB);
     }
 
     [ComImport]
@@ -295,6 +323,93 @@ namespace MegaFala.Audio
             }
         }
 
+        public static int RecoverSilentSessions(float restoreVolume)
+        {
+            var recovered = 0;
+            IMMDevice device = null;
+            IAudioSessionManager2 manager = null;
+            IAudioSessionEnumerator enumerator = null;
+
+            try
+            {
+                device = GetDefaultDevice();
+                manager = GetSessionManager(device);
+                Marshal.ThrowExceptionForHR(manager.GetSessionEnumerator(out enumerator));
+
+                int count;
+                Marshal.ThrowExceptionForHR(enumerator.GetCount(out count));
+
+                for (var index = 0; index < count; index++)
+                {
+                    IAudioSessionControl control = null;
+                    ISimpleAudioVolume volume = null;
+
+                    try
+                    {
+                        Marshal.ThrowExceptionForHR(enumerator.GetSession(index, out control));
+                        volume = (ISimpleAudioVolume)control;
+
+                        float currentVolume;
+                        bool currentMuted;
+                        Marshal.ThrowExceptionForHR(volume.GetMasterVolume(out currentVolume));
+                        Marshal.ThrowExceptionForHR(volume.GetMute(out currentMuted));
+
+                        if (currentVolume > 0.0001f)
+                        {
+                            continue;
+                        }
+
+                        var context = Guid.Empty;
+                        Marshal.ThrowExceptionForHR(volume.SetMasterVolume(restoreVolume, ref context));
+                        Marshal.ThrowExceptionForHR(volume.SetMute(false, ref context));
+                        recovered++;
+                    }
+                    finally
+                    {
+                        ReleaseCom(volume);
+                        ReleaseCom(control);
+                    }
+                }
+            }
+            finally
+            {
+                ReleaseCom(enumerator);
+                ReleaseCom(manager);
+                ReleaseCom(device);
+            }
+
+            return recovered;
+        }
+
+        public static void EnsureDefaultEndpointAudible(float minimumVolume)
+        {
+            IMMDevice device = null;
+            IAudioEndpointVolume endpointVolume = null;
+
+            try
+            {
+                device = GetDefaultDevice();
+                object endpointObject;
+                var iid = typeof(IAudioEndpointVolume).GUID;
+                Marshal.ThrowExceptionForHR(device.Activate(ref iid, ClsCtxAll, IntPtr.Zero, out endpointObject));
+                endpointVolume = (IAudioEndpointVolume)endpointObject;
+
+                float currentVolume;
+                Marshal.ThrowExceptionForHR(endpointVolume.GetMasterVolumeLevelScalar(out currentVolume));
+                var context = Guid.Empty;
+                Marshal.ThrowExceptionForHR(endpointVolume.SetMute(false, ref context));
+                if (currentVolume <= 0.0001f)
+                {
+                    Marshal.ThrowExceptionForHR(endpointVolume.SetMasterVolumeLevelScalar(minimumVolume, ref context));
+                }
+            }
+            finally
+            {
+                ReleaseCom(endpointVolume);
+                ReleaseCom(device);
+            }
+        }
+
         private static void ReleaseCom(object value)
         {
             if (value != null && Marshal.IsComObject(value))
@@ -309,6 +424,8 @@ namespace MegaFala.Audio
 if (-not ([System.Management.Automation.PSTypeName]'MegaFala.Audio.SessionVolumeController').Type) {
     Add-Type -TypeDefinition $coreAudioType -Language CSharp
 }
+
+$snapshotStatePath = Join-Path ([System.IO.Path]::GetTempPath()) 'MegaFala.audio-duck-state.json'
 
 $state = @{
     CaptureActive = $false
@@ -329,6 +446,76 @@ function Emit-Event {
         payload = $Payload
     } | ConvertTo-Json -Compress))
     [Console]::Out.Flush()
+}
+
+function Save-SnapshotState {
+    param(
+        [System.Collections.Generic.List[MegaFala.Audio.AudioSessionSnapshot]]$Snapshots
+    )
+
+    $payload = @($Snapshots | ForEach-Object {
+        @{
+            InstanceId = $_.InstanceId
+            Volume = $_.Volume
+            Muted = $_.Muted
+        }
+    })
+
+    Set-Content -Path $snapshotStatePath -Value ($payload | ConvertTo-Json -Compress) -Encoding UTF8
+}
+
+function Load-SnapshotState {
+    if (-not (Test-Path $snapshotStatePath)) {
+        return @()
+    }
+
+    $raw = Get-Content -Path $snapshotStatePath -Raw
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return @()
+    }
+
+    $items = @($raw | ConvertFrom-Json)
+    return @($items | ForEach-Object {
+        $snapshot = New-Object MegaFala.Audio.AudioSessionSnapshot
+        $snapshot.InstanceId = [string]$_.InstanceId
+        $snapshot.Volume = [float]$_.Volume
+        $snapshot.Muted = [bool]$_.Muted
+        $snapshot
+    })
+}
+
+function Clear-SnapshotState {
+    if (Test-Path $snapshotStatePath) {
+        Remove-Item $snapshotStatePath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Restore-StaleSnapshotState {
+    $snapshots = Load-SnapshotState
+    if ($snapshots.Count -eq 0) {
+        Clear-SnapshotState
+        return $false
+    }
+
+    $typedSnapshots = New-Object System.Collections.Generic.List[MegaFala.Audio.AudioSessionSnapshot]
+    foreach ($snapshot in $snapshots) {
+        [void]$typedSnapshots.Add($snapshot)
+    }
+
+    [MegaFala.Audio.SessionVolumeController]::Restore($typedSnapshots)
+    Clear-SnapshotState
+    return $true
+}
+
+function Recover-AudioOutput {
+    $restoredSnapshot = Restore-StaleSnapshotState
+    $recoveredSessions = [MegaFala.Audio.SessionVolumeController]::RecoverSilentSessions([float]0.35)
+    [MegaFala.Audio.SessionVolumeController]::EnsureDefaultEndpointAudible([float]0.35)
+
+    return @{
+        restored_snapshot = [bool]$restoredSnapshot
+        recovered_sessions = [int]$recoveredSessions
+    }
 }
 
 function Configure-Controller {
@@ -363,20 +550,32 @@ function Start-CaptureDuck {
     foreach ($snapshot in $snapshots) {
         [void]$state.Snapshots.Add($snapshot)
     }
+    Save-SnapshotState -Snapshots $state.Snapshots
 
     $state.CaptureActive = $true
 }
 
 function Stop-CaptureDuck {
     if (-not $state.CaptureActive) {
+        if (Test-Path $snapshotStatePath) {
+            Restore-StaleSnapshotState | Out-Null
+        }
         return
     }
 
     [MegaFala.Audio.SessionVolumeController]::Restore($state.Snapshots)
     $state.Snapshots = New-Object System.Collections.Generic.List[MegaFala.Audio.AudioSessionSnapshot]
     $state.CaptureActive = $false
+    Clear-SnapshotState
 }
 
+if ($RecoverAudio) {
+    $result = Recover-AudioOutput
+    Emit-Event -Type 'recovered' -Payload $result
+    exit 0
+}
+
+Restore-StaleSnapshotState | Out-Null
 Emit-Event -Type 'ready'
 
 try {

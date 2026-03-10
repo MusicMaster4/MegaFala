@@ -134,6 +134,13 @@ faça um destes:
 
 Esse build deve ser executado em uma maquina macOS. O `electron-builder` nao gera um `.app` ou `.dmg` macOS funcional a partir de uma maquina Windows comum.
 
+Para este projeto, o caminho mais seguro e gerar dois builds separados:
+
+- `x64`, para Macs Intel
+- `arm64`, para Macs Apple Silicon (`M1`, `M2`, `M3`, etc.)
+
+Isso e melhor do que forcar um pacote universal agora porque o app embute workers Python do `PyInstaller`, e esses binarios nativos precisam ser compilados para a arquitetura correta.
+
 ### Pre-requisitos
 
 - `Python 3.12`
@@ -167,6 +174,11 @@ npm install
 chmod +x ./scripts/build-python.sh
 ```
 
+Observacao:
+
+- `python/requirements.txt` agora instala `nvidia-cublas-cu12` apenas no Windows
+- no macOS, o worker usa CPU, entao essa dependencia nao deve ser instalada
+
 ### Validar o codigo
 
 ```bash
@@ -181,10 +193,32 @@ npm run build:python
 
 No macOS, esse comando usa `scripts/build-python.sh`.
 
+Se voce quiser fixar a arquitetura explicitamente durante o build local:
+
+```bash
+PYINSTALLER_TARGET_ARCH=x86_64 npm run build:python
+```
+
+ou:
+
+```bash
+PYINSTALLER_TARGET_ARCH=arm64 npm run build:python
+```
+
 ### Gerar o pacote macOS
 
 ```bash
 npm run dist:mac
+```
+
+Para gerar builds especificos por arquitetura:
+
+```bash
+npm run dist:mac:x64
+```
+
+```bash
+npm run dist:mac:arm64
 ```
 
 Saidas esperadas:
@@ -201,8 +235,27 @@ Para distribuicao externa no macOS, o ideal e configurar:
 
 - certificado de assinatura Apple
 - notarizacao da Apple
+- entitlement e hardened runtime de acordo com a assinatura do app final
 
 Se voce for distribuir fora da sua propria maquina, esse e o passo seguinte.
+
+## GitHub Actions para macOS
+
+O workflow em `.github/workflows/build-macos.yml` gera:
+
+- um build `x64` em runner Intel
+- um build `arm64` em runner Apple Silicon
+
+Fluxo:
+
+1. instala `Node.js 20` e `Python 3.12`
+2. instala dependencias Node e Python
+3. compila os workers Python com `PyInstaller` na arquitetura nativa do runner
+4. gera `dmg` e `zip` com `electron-builder`
+5. valida a arquitetura dos binarios com `lipo`
+6. publica os artefatos do job
+
+Esse e o fluxo recomendado para este repositorio porque evita misturar um app Electron universal com subprocessos Python de arquitetura unica.
 
 ## Pipeline resumido
 
@@ -243,4 +296,3 @@ npm run dist:mac
 - o controle de ducking do audio do sistema continua ativo apenas no Windows
 - no macOS, o app funciona sem esse ducking; a transcricao continua funcionando normalmente
 - o download dos modelos ainda nao tem barra de progresso dedicada na interface
-

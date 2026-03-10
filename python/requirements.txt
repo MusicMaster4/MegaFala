@@ -1,5 +1,5 @@
 faster-whisper==1.1.1
-nvidia-cublas-cu12==12.9.1.4
+nvidia-cublas-cu12==12.9.1.4 ; platform_system == "Windows"
 numpy==2.3.0
 pynput==1.8.1
 python-dotenv==1.2.2

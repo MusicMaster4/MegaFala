@@ -73,11 +73,11 @@ const TRANSLATIONS = {
     fillRuleError: 'Fill in the inputs and the replacement.',
     copy: 'Copy',
     copied: 'Copied',
-    loadingStatusTitle: 'Loading transcription model',
-    loadingStatusDetail: 'Preparing the local transcription model.',
-    loadingStatusHint: 'The first download can take a bit longer. The model stays installed after that.',
-    switchingStatusTitle: 'Finalizing model installation',
-    switchingStatusHint: 'If this is the first download, keep the app open until the worker finishes.',
+    loadingStatusTitle: 'Loading model',
+    loadingStatusDetail: '',
+    loadingStatusHint: '',
+    switchingStatusTitle: 'Loading model',
+    switchingStatusHint: '',
     errorStatusTitle: 'Something needs attention',
     errorStatusHint: 'Check the system diagnostics below if this keeps happening.',
   },
@@ -148,11 +148,11 @@ const TRANSLATIONS = {
     fillRuleError: 'Preencha as entradas e a substituição.',
     copy: 'Copiar',
     copied: 'Copiado',
-    loadingStatusTitle: 'Carregando modelo de transcricao',
-    loadingStatusDetail: 'Preparando o modelo local de transcricao.',
-    loadingStatusHint: 'No primeiro download isso pode levar alguns minutos. Depois o modelo fica salvo neste computador.',
-    switchingStatusTitle: 'Finalizando a instalacao do modelo',
-    switchingStatusHint: 'Se este for o primeiro download, mantenha o app aberto ate o worker terminar.',
+    loadingStatusTitle: 'Carregando o modelo',
+    loadingStatusDetail: '',
+    loadingStatusHint: '',
+    switchingStatusTitle: 'Carregando o modelo',
+    switchingStatusHint: '',
     errorStatusTitle: 'Algo precisa de atencao',
     errorStatusHint: 'Se isso continuar, verifique o diagnostico do sistema logo abaixo.',
   },
@@ -199,8 +199,6 @@ const els = {
   noticeStrip: document.getElementById('notice-strip'),
   statusPanel: document.getElementById('status-panel'),
   statusPanelTitle: document.getElementById('status-panel-title'),
-  statusPanelDetail: document.getElementById('status-panel-detail'),
-  statusPanelNote: document.getElementById('status-panel-note'),
   statusPanelProgress: document.getElementById('status-panel-progress'),
   detectionLanguageDefaults: document.getElementById('detection-language-defaults'),
   detectionLanguageSummary: document.getElementById('detection-language-summary'),
@@ -431,9 +429,7 @@ function getStatusPanelData(state) {
     return {
       tone: 'error',
       icon: '!',
-      title: t('errorStatusTitle'),
-      detail: state.error,
-      note: t('errorStatusHint'),
+      title: state.error || t('errorStatusTitle'),
       showProgress: false,
     };
   }
@@ -444,18 +440,12 @@ function getStatusPanelData(state) {
   }
 
   const modelName = modelLabel(state.model);
-  const title = state.switchingModel
-    ? `${t('switchingStatusTitle')}: ${modelName}`
-    : `${t('loadingStatusTitle')}: ${modelName}`;
-  const detail = state.notice || t('loadingStatusDetail');
-  const note = state.switchingModel ? t('switchingStatusHint') : t('loadingStatusHint');
+  const title = `${state.switchingModel ? t('switchingStatusTitle') : t('loadingStatusTitle')}: ${modelName}`;
 
   return {
     tone: 'loading',
     icon: '',
     title,
-    detail,
-    note,
     showProgress: true,
   };
 }
@@ -472,8 +462,6 @@ function renderStatusPanel(state) {
   els.statusPanel.classList.toggle('status-panel--loading', panelState.tone === 'loading');
   els.statusPanel.classList.toggle('status-panel--error', panelState.tone === 'error');
   els.statusPanelTitle.textContent = panelState.title;
-  els.statusPanelDetail.textContent = panelState.detail;
-  els.statusPanelNote.textContent = panelState.note;
   els.statusPanelProgress.classList.toggle('hidden', !panelState.showProgress);
 
   const spinner = els.statusPanel.querySelector('.status-panel__spinner');
