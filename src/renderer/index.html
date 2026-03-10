@@ -24,11 +24,11 @@
         <div class="topbar__meta">
           <div class="shortcut-meta">
             <span data-i18n="globalShortcut">Global shortcut</span>
-            <strong id="shortcut-label">Ctrl+Win</strong>
+            <strong id="shortcut-label">--</strong>
           </div>
           <div class="shortcut-meta">
             <span data-i18n="pasteLastShortcut">Paste last</span>
-            <strong id="paste-shortcut-label">Ctrl+Alt+V</strong>
+            <strong id="paste-shortcut-label">--</strong>
           </div>
           <button class="secondary-button" id="open-dictionary" type="button" data-i18n="dictionary">
             Dictionary
@@ -182,6 +182,18 @@
               </div>
               <span class="toggle-switch">
                 <input id="show-overlay-bar" type="checkbox" />
+                <span></span>
+              </span>
+            </label>
+            <label class="toggle-card" for="launch-at-login">
+              <div>
+                <strong data-i18n="startWithComputer">Start with the computer</strong>
+                <p data-i18n="startWithComputerCopy">
+                  Launch MegaFala in the background when you sign in.
+                </p>
+              </div>
+              <span class="toggle-switch">
+                <input id="launch-at-login" type="checkbox" />
                 <span></span>
               </span>
             </label>

@@ -53,8 +53,8 @@ Pontos importantes:
 
 ### macOS
 
-- ditado: `Ctrl+Command`
-- hands-free: segure `Ctrl+Command` e aperte `Space`
+- ditado: `Control+Command`
+- hands-free: segure `Control+Command` e aperte `Space`
 - colar ultima transcricao: `Command+Option+V`
 
 Se `FLOW_HOTKEY` estiver vazio, o app usa automaticamente o atalho padrao da plataforma.

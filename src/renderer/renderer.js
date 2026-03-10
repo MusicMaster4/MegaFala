@@ -35,6 +35,9 @@ const TRANSLATIONS = {
     floatingBar: 'Floating bar',
     showOverlay: 'Show global overlay',
     showOverlayCopy: 'Display the recording indicator above any app.',
+    startWithComputer: 'Start with the computer',
+    startWithComputerCopy:
+      'Launch MegaFala in the background when you sign in. The tray icon and floating bar stay ready.',
     soundEffects: 'Sound feedback',
     soundEffectsCopy: 'Play sounds on load, start, stop, cancel, and hands-free activation.',
     detectionLanguages: 'Detection languages',
@@ -110,6 +113,9 @@ const TRANSLATIONS = {
     floatingBar: 'Barra flutuante',
     showOverlay: 'Exibir overlay global',
     showOverlayCopy: 'Mostra o indicador de gravação acima de qualquer app.',
+    startWithComputer: 'Iniciar com o computador',
+    startWithComputerCopy:
+      'Abre o MegaFala em segundo plano ao entrar no sistema. O icone na bandeja e a barra flutuante ficam prontos.',
     soundEffects: 'Sons de feedback',
     soundEffectsCopy: 'Toca sons ao carregar, iniciar, encerrar, cancelar e ativar hands-free.',
     detectionLanguages: 'Idiomas de detecção',
@@ -235,6 +241,7 @@ const els = {
   settingsDrawer: document.getElementById('settings-drawer'),
   settingsBackdrop: document.getElementById('settings-backdrop'),
   showOverlayBar: document.getElementById('show-overlay-bar'),
+  launchAtLogin: document.getElementById('launch-at-login'),
   soundEffectsEnabled: document.getElementById('sound-effects-enabled'),
   themeRadios: document.querySelectorAll('input[name="theme"]'),
   interfaceLanguageSearch: document.getElementById('interface-language-search'),
@@ -407,18 +414,20 @@ function formatMs(ms) {
   return value > 0 ? `${Math.round(value)} ms` : '--';
 }
 
-function formatShortcut(shortcut) {
+function formatShortcut(shortcut, platform = 'win32') {
   return String(shortcut || '')
     .split('+')
     .map((part) => {
       const token = part.trim().toLowerCase();
-      if (token === 'commandorcontrol' || token === 'ctrl') return 'Ctrl';
-      if (token === 'control') return 'Ctrl';
-      if (token === 'command' || token === 'cmd') return 'Cmd';
+      if (token === 'commandorcontrol') return platform === 'darwin' ? 'Command' : 'Ctrl';
+      if (token === 'ctrl' || token === 'control') return platform === 'darwin' ? 'Control' : 'Ctrl';
+      if (token === 'command' || token === 'cmd') return 'Command';
       if (token === 'shift') return 'Shift';
       if (token === 'space') return 'Space';
-      if (token === 'alt' || token === 'option') return 'Alt';
-      if (token === 'windows' || token === 'left windows' || token === 'right windows') return 'Win';
+      if (token === 'alt' || token === 'option') return platform === 'darwin' ? 'Option' : 'Alt';
+      if (token === 'windows' || token === 'super' || token === 'left windows' || token === 'right windows') {
+        return platform === 'darwin' ? 'Command' : 'Win';
+      }
       return token.length === 1 ? token.toUpperCase() : token;
     })
     .join('+');
@@ -713,12 +722,13 @@ function renderState(state) {
   hideToast();
   renderStatusPanel(state);
 
-  els.shortcutLabel.textContent = formatShortcut(state.shortcut) || '--';
-  els.pasteShortcutLabel.textContent = formatShortcut(state.pasteLastShortcut) || '--';
+  els.shortcutLabel.textContent = formatShortcut(state.shortcut, state.platform) || '--';
+  els.pasteShortcutLabel.textContent = formatShortcut(state.pasteLastShortcut, state.platform) || '--';
   els.activeModelLabel.textContent = `${modelLabel(state.model)} (${state.model})`;
   els.deviceLabel.textContent = state.device ? String(state.device).toUpperCase() : '--';
   els.deviceNote.textContent = state.deviceNote || t('noNotes');
   els.showOverlayBar.checked = Boolean(state.showOverlayBar);
+  els.launchAtLogin.checked = Boolean(state.launchAtLogin);
   els.soundEffectsEnabled.checked = Boolean(state.soundEffectsEnabled);
 
   renderUsageSummary(state.usageSummary || {});
@@ -874,6 +884,9 @@ function setupHandlers() {
 
   els.showOverlayBar.addEventListener('change', async () => {
     renderState(await window.flowLocal.updateSettings({ showOverlayBar: els.showOverlayBar.checked }));
+  });
+  els.launchAtLogin.addEventListener('change', async () => {
+    renderState(await window.flowLocal.updateSettings({ launchAtLogin: els.launchAtLogin.checked }));
   });
   els.soundEffectsEnabled.addEventListener('change', async () => {
     renderState(await window.flowLocal.updateSettings({ soundEffectsEnabled: els.soundEffectsEnabled.checked }));

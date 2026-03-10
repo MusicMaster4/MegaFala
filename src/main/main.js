@@ -2,7 +2,17 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config({ path: path.join(process.cwd(), '.env') });
 
-const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, screen } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  clipboard,
+  globalShortcut,
+  ipcMain,
+  nativeImage,
+  screen,
+} = require('electron');
 const { spawn } = require('child_process');
 const readline = require('readline');
 
@@ -14,6 +24,7 @@ const DEFAULT_LANGUAGES = ['pt', 'en'];
 const DEFAULT_INTERFACE_LANGUAGE = 'en';
 const DEFAULT_SHOW_OVERLAY_BAR = true;
 const DEFAULT_SOUND_EFFECTS_ENABLED = true;
+const DEFAULT_LAUNCH_AT_LOGIN = false;
 const PERSISTENCE_VERSION = 4;
 const SERVICE_SHUTDOWN_TIMEOUT_MS = 2500;
 const OVERLAY_WIDTH = 96;
@@ -184,13 +195,18 @@ const MAIN_TRANSLATIONS = {
     dictionaryOff: 'Dictionary cleared.',
     modelStatsReset: 'Model stats reset.',
     interfaceLanguageChanged: 'Interface language: {language}.',
-    handsFreeActive: 'Hands-free mode active. Press Ctrl + Win to finish and transcribe.',
+    handsFreeActive: 'Hands-free mode active. Press {shortcut} to finish and transcribe.',
     waitingSwitchHandsFree:
       'Switching to {model}. Hands-free mode will start when the new worker is ready.',
     waitingSwitchHold: 'Switching to {model}. Wait for the new worker to finish loading.',
     waitingBootHandsFree: 'The model is still loading. Hands-free mode will start when it is ready.',
     waitingBootHold: 'The model is still loading. Wait a few seconds.',
     transcriptionBusy: 'Wait for the current transcription to finish before starting a new dictation.',
+    launchAtLoginOn: 'Start with the computer enabled.',
+    launchAtLoginOff: 'Start with the computer disabled.',
+    trayOpenApp: 'Open MegaFala',
+    trayHideApp: 'Hide window',
+    trayQuit: 'Quit',
   },
   'pt-BR': {
     activeLanguages: 'Idiomas de deteccao: {summary}.',
@@ -203,7 +219,7 @@ const MAIN_TRANSLATIONS = {
     dictionaryOff: 'Dicionario limpo.',
     modelStatsReset: 'Estatisticas de modelos resetadas.',
     interfaceLanguageChanged: 'Idioma da interface: {language}.',
-    handsFreeActive: 'Modo hands-free ativo. Pressione Ctrl + Win para finalizar e transcrever.',
+    handsFreeActive: 'Modo hands-free ativo. Pressione {shortcut} para finalizar e transcrever.',
     waitingSwitchHandsFree:
       'Trocando para {model}. O modo hands-free sera ativado quando o novo worker ficar pronto.',
     waitingSwitchHold: 'Trocando para {model}. Aguarde o novo worker ficar pronto.',
@@ -212,11 +228,17 @@ const MAIN_TRANSLATIONS = {
     waitingBootHold: 'O modelo ainda esta carregando. Aguarde alguns segundos.',
     transcriptionBusy:
       'Aguarde a transcricao atual terminar antes de iniciar um novo ditado.',
+    launchAtLoginOn: 'Inicializacao com o computador ativada.',
+    launchAtLoginOff: 'Inicializacao com o computador desativada.',
+    trayOpenApp: 'Abrir MegaFala',
+    trayHideApp: 'Ocultar janela',
+    trayQuit: 'Fechar',
   },
 };
 
 let mainWindow = null;
 let overlayWindow = null;
+let tray = null;
 let serviceProcess = null;
 let serviceReader = null;
 let hotkeyProcess = null;
@@ -237,6 +259,8 @@ let captureMuteDepth = 0;
 let suppressStartSoundUntil = 0;
 let suppressStartRequestsUntil = 0;
 let ignoreNextHotkeyRelease = false;
+let isQuitting = false;
+let shouldStartHiddenOnLaunch = process.argv.some((arg) => arg === '--background');
 
 function getDefaultModel() {
   return process.env.WHISPER_MODEL || 'small';
@@ -661,6 +685,46 @@ function getShortcutFromEnv(name, fallback) {
   return value || fallback;
 }
 
+function formatShortcutForDisplay(shortcut, platform = process.platform) {
+  const labels = String(shortcut || '')
+    .split('+')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean)
+    .map((token) => {
+      if (token === 'commandorcontrol') {
+        return platform === 'darwin' ? 'Command' : 'Ctrl';
+      }
+
+      if (token === 'control' || token === 'ctrl') {
+        return platform === 'darwin' ? 'Control' : 'Ctrl';
+      }
+
+      if (token === 'command' || token === 'cmd') {
+        return 'Command';
+      }
+
+      if (token === 'option' || token === 'alt') {
+        return platform === 'darwin' ? 'Option' : 'Alt';
+      }
+
+      if (token === 'windows' || token === 'super') {
+        return platform === 'darwin' ? 'Command' : 'Win';
+      }
+
+      if (token === 'shift') {
+        return 'Shift';
+      }
+
+      if (token === 'space') {
+        return 'Space';
+      }
+
+      return token.length === 1 ? token.toUpperCase() : token;
+    });
+
+  return labels.join('+');
+}
+
 function shortcutToElectronAccelerator(shortcut) {
   const tokens = String(shortcut || '')
     .split('+')
@@ -723,6 +787,7 @@ function getDefaultsFromEnv() {
     model: normalizeModel(getDefaultModel()),
     showOverlayBar: DEFAULT_SHOW_OVERLAY_BAR,
     soundEffectsEnabled: DEFAULT_SOUND_EFFECTS_ENABLED,
+    launchAtLogin: DEFAULT_LAUNCH_AT_LOGIN,
     dictionaryEntries: [],
     overlayPosition: null,
   };
@@ -760,6 +825,7 @@ const state = {
   usageStats: createEmptyUsageStats(),
   showOverlayBar: defaults.showOverlayBar,
   soundEffectsEnabled: defaults.soundEffectsEnabled,
+  launchAtLogin: defaults.launchAtLogin,
   dictionaryEntries: defaults.dictionaryEntries,
   overlayPosition: defaults.overlayPosition,
   pendingPaste: false,
@@ -769,6 +835,12 @@ const state = {
 rebuildDictionaryReplacementIndex(defaults.dictionaryEntries);
 
 app.setName(APP_NAME);
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+
+if (!singleInstanceLock) {
+  app.quit();
+}
 
 function getAppCodePath() {
   return app.getAppPath();
@@ -811,6 +883,28 @@ function getAppIconPath() {
   return path.join(getProjectRoot(), 'src', 'assets', 'megaf.ico');
 }
 
+function getTrayIconAssetPath() {
+  if (process.platform === 'darwin') {
+    return path.join(getProjectRoot(), 'src', 'assets', 'megaf-trayTemplate.png');
+  }
+
+  return getAppIconPath();
+}
+
+function getTrayIconImage() {
+  let image = nativeImage.createFromPath(getTrayIconAssetPath());
+  if (image.isEmpty()) {
+    image = nativeImage.createFromPath(getAppIconPath());
+  }
+
+  if (process.platform === 'darwin') {
+    image.setTemplateImage(true);
+    return image.resize({ width: 18, height: 18 });
+  }
+
+  return image.resize({ width: 16, height: 16 });
+}
+
 function getSettingsPath() {
   return path.join(getStorageDirectory(), 'settings.json');
 }
@@ -841,6 +935,7 @@ function createEmptyPersistedState() {
       model: defaults.model,
       showOverlayBar: defaults.showOverlayBar,
       soundEffectsEnabled: defaults.soundEffectsEnabled,
+      launchAtLogin: defaults.launchAtLogin,
       dictionaryEntries: defaults.dictionaryEntries,
       overlayPosition: defaults.overlayPosition,
     },
@@ -878,6 +973,10 @@ function normalizePersistedState(payload) {
         typeof preferencesSource.soundEffectsEnabled === 'boolean'
           ? preferencesSource.soundEffectsEnabled
           : defaults.soundEffectsEnabled,
+      launchAtLogin:
+        typeof preferencesSource.launchAtLogin === 'boolean'
+          ? preferencesSource.launchAtLogin
+          : defaults.launchAtLogin,
       dictionaryEntries: normalizeDictionaryEntries(preferencesSource.dictionaryEntries),
       overlayPosition: defaults.overlayPosition,
     },
@@ -917,6 +1016,7 @@ function savePersistentState() {
       model: state.model,
       showOverlayBar: state.showOverlayBar,
       soundEffectsEnabled: state.soundEffectsEnabled,
+      launchAtLogin: state.launchAtLogin,
       dictionaryEntries: state.dictionaryEntries,
       overlayPosition: defaults.overlayPosition,
     },
@@ -935,6 +1035,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 720,
     autoHideMenuBar: true,
+    show: false,
     title: APP_NAME,
     icon: getAppIconPath(),
     backgroundColor: '#f4f1eb',
@@ -950,11 +1051,25 @@ function createWindow() {
   mainWindow.webContents.on('did-finish-load', () => {
     syncAudioControllerConfig();
   });
+  mainWindow.once('ready-to-show', () => {
+    if (shouldStartHiddenOnLaunch) {
+      hideMainWindow();
+      return;
+    }
+
+    showMainWindow({ focus: false });
+  });
+  mainWindow.on('close', (event) => {
+    if (isQuitting) {
+      return;
+    }
+
+    event.preventDefault();
+    hideMainWindow();
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
-    if (process.platform !== 'darwin') {
-      app.quit();
-    }
+    refreshTrayMenu();
   });
 }
 
@@ -1076,6 +1191,7 @@ function createOverlayWindow() {
 function snapshotState() {
   return {
     ...state,
+    platform: process.platform,
     historyTotal: state.history.length,
     usageSummary: buildUsageSummary(state.usageStats),
   };
@@ -1092,6 +1208,119 @@ function setState(patch) {
     overlayWindow.webContents.send('app-state', snapshotState());
     syncOverlayWindow();
   }
+
+  refreshTrayMenu();
+}
+
+function hasVisibleMainWindow() {
+  return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
+}
+
+function showMainWindow(options = {}) {
+  const { focus = true } = options;
+  shouldStartHiddenOnLaunch = false;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show();
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+
+  if (focus) {
+    mainWindow.focus();
+  }
+
+  refreshTrayMenu();
+}
+
+function hideMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.hide();
+
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.hide();
+  }
+
+  refreshTrayMenu();
+}
+
+function toggleMainWindowVisibility() {
+  if (hasVisibleMainWindow()) {
+    hideMainWindow();
+    return;
+  }
+
+  showMainWindow();
+}
+
+function createTray() {
+  if (tray) {
+    return tray;
+  }
+
+  tray = new Tray(getTrayIconImage());
+  tray.setToolTip(APP_NAME);
+  tray.on('click', () => {
+    toggleMainWindowVisibility();
+  });
+  tray.on('double-click', () => {
+    showMainWindow();
+  });
+  refreshTrayMenu();
+  return tray;
+}
+
+function refreshTrayMenu() {
+  if (!tray) {
+    return;
+  }
+
+  const visible = hasVisibleMainWindow();
+  const menu = Menu.buildFromTemplate([
+    {
+      label: translateMain(visible ? 'trayHideApp' : 'trayOpenApp'),
+      click: () => {
+        if (visible) {
+          hideMainWindow();
+          return;
+        }
+
+        showMainWindow();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: translateMain('trayQuit'),
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(menu);
+}
+
+function syncLaunchAtLoginSetting() {
+  app.setLoginItemSettings({
+    openAtLogin: state.launchAtLogin,
+    openAsHidden: state.launchAtLogin,
+    args: ['--background'],
+  });
 }
 
 function setOverlayAudioLevel(level) {
@@ -1542,7 +1771,9 @@ function startListening(mode = 'hold') {
     if (captureMode === 'hands-free' && state.captureMode !== 'hands-free') {
       setState({
         captureMode,
-        notice: translateMain('handsFreeActive'),
+        notice: translateMain('handsFreeActive', {
+          shortcut: formatShortcutForDisplay(state.shortcut),
+        }),
         error: '',
       });
       playHandsFreeSoundIfEligible();
@@ -1557,7 +1788,12 @@ function startListening(mode = 'hold') {
     captureMode,
     dictationSessionId: sessionId,
     pendingStartMode: null,
-    notice: captureMode === 'hands-free' ? translateMain('handsFreeActive') : clearHandsFreeNotice(),
+    notice:
+      captureMode === 'hands-free'
+        ? translateMain('handsFreeActive', {
+            shortcut: formatShortcutForDisplay(state.shortcut),
+          })
+        : clearHandsFreeNotice(),
     error: '',
   });
   if (Date.now() >= suppressStartSoundUntil) {
@@ -2336,6 +2572,8 @@ async function applySettings(patch) {
     typeof patch.soundEffectsEnabled === 'boolean'
       ? patch.soundEffectsEnabled
       : state.soundEffectsEnabled;
+  const nextLaunchAtLogin =
+    typeof patch.launchAtLogin === 'boolean' ? patch.launchAtLogin : state.launchAtLogin;
   const nextDictionaryEntries = Object.prototype.hasOwnProperty.call(patch, 'dictionaryEntries')
     ? normalizeDictionaryEntries(patch.dictionaryEntries)
     : state.dictionaryEntries;
@@ -2345,6 +2583,7 @@ async function applySettings(patch) {
   const interfaceLanguageChanged = nextInterfaceLanguage !== state.interfaceLanguage;
   const overlayChanged = nextShowOverlayBar !== state.showOverlayBar;
   const soundEffectsChanged = nextSoundEffectsEnabled !== state.soundEffectsEnabled;
+  const launchAtLoginChanged = nextLaunchAtLogin !== state.launchAtLogin;
   const dictionaryChanged =
     JSON.stringify(nextDictionaryEntries) !== JSON.stringify(state.dictionaryEntries);
 
@@ -2375,6 +2614,12 @@ async function applySettings(patch) {
       {},
       nextInterfaceLanguage,
     );
+  } else if (launchAtLoginChanged) {
+    notice = translateMain(
+      nextLaunchAtLogin ? 'launchAtLoginOn' : 'launchAtLoginOff',
+      {},
+      nextInterfaceLanguage,
+    );
   } else if (dictionaryChanged) {
     notice =
       nextDictionaryEntries.length > 0
@@ -2398,6 +2643,7 @@ async function applySettings(patch) {
     model: nextModel,
     showOverlayBar: nextShowOverlayBar,
     soundEffectsEnabled: nextSoundEffectsEnabled,
+    launchAtLogin: nextLaunchAtLogin,
     dictionaryEntries: nextDictionaryEntries,
     notice,
     error: '',
@@ -2407,6 +2653,10 @@ async function applySettings(patch) {
   }
 
   savePersistentState();
+
+  if (launchAtLoginChanged) {
+    syncLaunchAtLoginSetting();
+  }
 
   if (modelChanged) {
     await restartDictationService();
@@ -2466,6 +2716,10 @@ ipcMain.on('overlay-drag-end', (_event, position) => {
   positionOverlayWindow(position, true);
 });
 
+app.on('second-instance', () => {
+  showMainWindow();
+});
+
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID);
   ensureRuntimeDirectories();
@@ -2480,12 +2734,17 @@ app.whenReady().then(() => {
     usageStats: persistedState.usageStats,
     showOverlayBar: persistedState.preferences.showOverlayBar,
     soundEffectsEnabled: persistedState.preferences.soundEffectsEnabled,
+    launchAtLogin: persistedState.preferences.launchAtLogin,
     dictionaryEntries: persistedState.preferences.dictionaryEntries,
     overlayPosition: defaults.overlayPosition,
   });
+  shouldStartHiddenOnLaunch =
+    shouldStartHiddenOnLaunch || Boolean(app.getLoginItemSettings().wasOpenedAsHidden);
   rebuildDictionaryReplacementIndex(persistedState.preferences.dictionaryEntries);
+  syncLaunchAtLoginSetting();
   registerPasteLastShortcut();
 
+  createTray();
   createWindow();
   createOverlayWindow();
   bootAudioController();
@@ -2497,13 +2756,15 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', positionOverlayWindow);
 
   app.on('activate', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      createWindow();
-    }
+    showMainWindow();
     if (!overlayWindow || overlayWindow.isDestroyed()) {
       createOverlayWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 app.on('will-quit', () => {
@@ -2512,7 +2773,7 @@ app.on('will-quit', () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && isQuitting) {
     app.quit();
   }
 });
