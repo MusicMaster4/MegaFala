@@ -157,8 +157,9 @@ class DictationService:
         self.vad = webrtcvad.Vad(2)
         self.model_name = os.getenv("WHISPER_MODEL", "small")
         self.model_dir = os.getenv("WHISPER_MODEL_DIR")
-        self.requested_device = os.getenv("WHISPER_DEVICE", "auto").lower()
+        self.requested_device = self._resolve_requested_device()
         self.compute_type = os.getenv("WHISPER_COMPUTE_TYPE")
+        self.cpu_threads = self._resolve_cpu_threads()
         self.allowed_languages = normalize_languages(os.getenv("ALLOWED_LANGUAGES", "pt,en"))
         self.stop_event = threading.Event()
         self.audio_queue: queue.Queue[bytes] = queue.Queue()
@@ -190,7 +191,8 @@ class DictationService:
 
         try:
             self.model = self._load_model(preferred_device, preferred_compute_type)
-            self._warmup_backend()
+            if sys.platform != "darwin":
+                self._warmup_backend()
         except Exception as error:
             if not self._should_fallback_to_cpu(error):
                 raise
@@ -219,11 +221,36 @@ class DictationService:
             self.model_name,
             device=device,
             compute_type=compute_type,
-            cpu_threads=max(1, (os.cpu_count() or 4) // 2),
+            cpu_threads=self.cpu_threads,
             download_root=self.model_dir,
         )
 
+    def _resolve_requested_device(self) -> str:
+        if sys.platform == "darwin":
+            return "cpu"
+
+        return os.getenv("WHISPER_DEVICE", "auto").lower()
+
+    def _resolve_cpu_threads(self) -> int:
+        value = os.getenv("WHISPER_CPU_THREADS")
+        try:
+            parsed = int(str(value).strip()) if value is not None else 0
+        except ValueError:
+            parsed = 0
+
+        if parsed > 0:
+            return parsed
+
+        if sys.platform == "darwin":
+            return max(1, min(4, (os.cpu_count() or 4) // 2))
+
+        return max(1, (os.cpu_count() or 4) // 2)
+
     def _resolve_device(self) -> str:
+        if sys.platform == "darwin":
+            self.device_note = "macOS usa CPU local para transcricao."
+            return "cpu"
+
         if self.requested_device in {"cpu", "cuda"}:
             return self.requested_device
 

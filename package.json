@@ -67,7 +67,12 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "icon": "src/assets/megaf.icns",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "MegaFala needs microphone access to capture your voice.",
+        "NSAppleEventsUsageDescription": "MegaFala needs permission to paste transcriptions into the active app."
+      }
     }
   },
   "license": "MIT",

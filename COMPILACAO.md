@@ -53,8 +53,8 @@ Pontos importantes:
 
 ### macOS
 
-- ditado: `Control+Command`
-- hands-free: segure `Control+Command` e aperte `Space`
+- ditado: `Option+Space`
+- no macOS, esse atalho funciona como toggle: um toque inicia e outro finaliza/transcreve
 - colar ultima transcricao: `Command+Option+V`
 
 Se `FLOW_HOTKEY` estiver vazio, o app usa automaticamente o atalho padrao da plataforma.
@@ -301,7 +301,8 @@ npm run dist:mac
 
 ## O que foi adaptado para funcionar nas duas plataformas
 
-- o listener global de teclado agora usa `pynput`, em vez de uma implementacao presa ao Windows
+- no Windows, o listener global de teclado usa `pynput`
+- no macOS, o atalho principal e registrado pelo `globalShortcut` do Electron para evitar o erro de processo nao confiavel do helper Python
 - a colagem automatica usa `PowerShell` no Windows e `osascript` no macOS
 - o build Python agora escolhe `PowerShell` ou `bash` conforme a plataforma
 - o cache dos modelos foi movido para a pasta de dados do usuario, em vez de depender do cache global padrao do Hugging Face

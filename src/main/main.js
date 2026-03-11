@@ -13,10 +13,10 @@ const {
   nativeImage,
   screen,
 } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const readline = require('readline');
 
-const DEFAULT_SHORTCUT = process.platform === 'darwin' ? 'ctrl+command' : 'ctrl+windows';
+const DEFAULT_SHORTCUT = process.platform === 'darwin' ? 'option+space' : 'ctrl+windows';
 const DEFAULT_PASTE_LAST_SHORTCUT =
   process.platform === 'darwin' ? 'command+option+v' : 'ctrl+alt+v';
 const PASTE_SHORTCUT_SETTLE_DELAY_MS = process.platform === 'darwin' ? 90 : 70;
@@ -253,6 +253,8 @@ let hotkeyToken = 0;
 let audioToken = 0;
 let serviceRestartVersion = 0;
 let hasPlayedLoadedFeedback = false;
+let mainShortcutRegisteredAccelerator = null;
+let mainShortcutRegisteredViaElectron = false;
 let pasteLastRegisteredAccelerator = null;
 let pasteLastRegisteredViaElectron = false;
 let lastPasteLastRequestAt = 0;
@@ -883,6 +885,10 @@ function getWorkerLaunchSpec(workerName) {
 }
 
 function getAppIconPath() {
+  if (process.platform === 'darwin') {
+    return path.join(getProjectRoot(), 'src', 'assets', 'megaf.png');
+  }
+
   return path.join(getProjectRoot(), 'src', 'assets', 'megaf.ico');
 }
 
@@ -924,9 +930,113 @@ function getModelsDirectory() {
   return path.join(app.getPath('userData'), 'models');
 }
 
+function getHuggingFaceHomeDirectory() {
+  return path.join(getModelsDirectory(), 'hf-home');
+}
+
+function getHuggingFaceHubCacheDirectory() {
+  return path.join(getModelsDirectory(), 'hub');
+}
+
+function getChildProcessRegistryPath() {
+  return path.join(getStorageDirectory(), 'child-processes.json');
+}
+
 function ensureRuntimeDirectories() {
   fs.mkdirSync(getStorageDirectory(), { recursive: true });
   fs.mkdirSync(getModelsDirectory(), { recursive: true });
+  fs.mkdirSync(getHuggingFaceHomeDirectory(), { recursive: true });
+  fs.mkdirSync(getHuggingFaceHubCacheDirectory(), { recursive: true });
+}
+
+function readChildProcessRegistry() {
+  const payload = readJsonFile(getChildProcessRegistryPath());
+  return payload && typeof payload === 'object' ? payload : {};
+}
+
+function writeChildProcessRegistry(payload) {
+  writeJsonFile(getChildProcessRegistryPath(), payload);
+}
+
+function trackChildProcess(kind, childProcess) {
+  if (!childProcess || !childProcess.pid) {
+    return;
+  }
+
+  const registry = readChildProcessRegistry();
+  const entries = Array.isArray(registry[kind]) ? registry[kind] : [];
+  if (!entries.includes(childProcess.pid)) {
+    registry[kind] = [...entries, childProcess.pid];
+    writeChildProcessRegistry(registry);
+  }
+}
+
+function untrackChildProcess(kind, pid) {
+  if (!pid) {
+    return;
+  }
+
+  const registry = readChildProcessRegistry();
+  const entries = Array.isArray(registry[kind]) ? registry[kind] : [];
+  const nextEntries = entries.filter((value) => value !== pid);
+  if (nextEntries.length > 0) {
+    registry[kind] = nextEntries;
+  } else {
+    delete registry[kind];
+  }
+  writeChildProcessRegistry(registry);
+}
+
+function terminateTrackedPid(pid, expectedName = '') {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
+    return;
+  }
+
+  if (process.platform !== 'darwin') {
+    return;
+  }
+
+  try {
+    process.kill(pid, 0);
+  } catch (_error) {
+    return;
+  }
+
+  if (expectedName) {
+    try {
+      const probe = spawnSync('ps', ['-p', String(pid), '-o', 'command='], {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      const commandLine = String(probe.stdout || '').trim().toLowerCase();
+      if (!commandLine.includes(String(expectedName).toLowerCase())) {
+        return;
+      }
+    } catch (_error) {
+      return;
+    }
+  }
+
+  try {
+    process.kill(pid);
+  } catch (_error) {
+    // Best effort.
+  }
+}
+
+function cleanupTrackedChildProcesses() {
+  const registry = readChildProcessRegistry();
+  for (const [kind, entries] of Object.entries(registry)) {
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+
+    for (const pid of entries) {
+      terminateTrackedPid(Number(pid), kind);
+    }
+  }
+
+  writeChildProcessRegistry({});
 }
 
 function createEmptyPersistedState() {
@@ -1357,6 +1467,16 @@ function setOverlayAudioLevel(level) {
 }
 
 function getServiceEnv() {
+  const macOverrides =
+    process.platform === 'darwin'
+      ? {
+          WHISPER_DEVICE: 'cpu',
+          WHISPER_COMPUTE_TYPE: 'int8',
+          WHISPER_CPU_THREADS: '4',
+          OMP_NUM_THREADS: '4',
+        }
+      : {};
+
   return {
     ...process.env,
     WHISPER_MODEL: state.model,
@@ -1364,13 +1484,14 @@ function getServiceEnv() {
     ALLOWED_LANGUAGES: state.allowedLanguages.join(','),
     FLOW_HOTKEY: state.shortcut,
     FLOW_PASTE_LAST_HOTKEY: state.pasteLastShortcut,
-    HF_HOME: path.join(getModelsDirectory(), 'hf-home'),
-    HUGGINGFACE_HUB_CACHE: path.join(getModelsDirectory(), 'hub'),
+    HF_HOME: getHuggingFaceHomeDirectory(),
+    HUGGINGFACE_HUB_CACHE: getHuggingFaceHubCacheDirectory(),
     HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
     HF_HUB_DISABLE_PROGRESS_BARS: '1',
     OBJC_DISABLE_INITIALIZE_FORK_SAFETY: 'YES',
     PYTHONIOENCODING: 'utf-8',
     PYTHONUTF8: '1',
+    ...macOverrides,
   };
 }
 
@@ -1526,6 +1647,15 @@ function insertTextIntoFocusedApp(text) {
 
         if (code === 0) {
           resolve();
+          return;
+        }
+
+        if (/not authorized|not permitted|assistive access|system events got an error/i.test(stderr)) {
+          reject(
+            new Error(
+              'Autorize o MegaFala em Privacy & Security > Accessibility e Automation para colar no app ativo.',
+            ),
+          );
           return;
         }
 
@@ -2303,6 +2433,79 @@ function unregisterPasteLastShortcut() {
   pasteLastRegisteredViaElectron = false;
 }
 
+function unregisterMainShortcut() {
+  if (mainShortcutRegisteredAccelerator) {
+    globalShortcut.unregister(mainShortcutRegisteredAccelerator);
+    mainShortcutRegisteredAccelerator = null;
+  }
+
+  mainShortcutRegisteredViaElectron = false;
+}
+
+function togglePrimaryShortcutCapture() {
+  if (hasOngoingTranscription()) {
+    releaseCaptureMute(true);
+    setState({
+      notice: translateMain('transcriptionBusy'),
+      error: '',
+    });
+    return;
+  }
+
+  const hasPendingOrActiveCapture =
+    state.captureMode !== null || state.pendingStartMode !== null || state.dictationSessionId !== null;
+
+  if (state.listening || hasPendingOrActiveCapture) {
+    suppressStartSoundUntil = Date.now() + 1200;
+    suppressStartRequestsUntil = Date.now() + 450;
+    stopListening();
+    return;
+  }
+
+  startListening(process.platform === 'darwin' ? 'hands-free' : 'hold');
+}
+
+function registerMainShortcut() {
+  unregisterMainShortcut();
+
+  const accelerator = shortcutToElectronAccelerator(state.shortcut);
+  if (!accelerator) {
+    setState({
+      hotkeyOnline: false,
+      error: `Atalho invalido para o ditado: ${state.shortcut}`,
+    });
+    return false;
+  }
+
+  try {
+    const registered = globalShortcut.register(accelerator, () => {
+      togglePrimaryShortcutCapture();
+    });
+
+    mainShortcutRegisteredViaElectron = registered;
+    if (!registered) {
+      setState({
+        hotkeyOnline: false,
+        error: `Nao foi possivel registrar o atalho global ${state.shortcut} para iniciar o ditado.`,
+      });
+      return false;
+    }
+
+    mainShortcutRegisteredAccelerator = accelerator;
+    setState({
+      hotkeyOnline: true,
+    });
+    return true;
+  } catch (error) {
+    mainShortcutRegisteredViaElectron = false;
+    setState({
+      hotkeyOnline: false,
+      error: `Falha ao registrar o atalho ${state.shortcut}: ${error.message}`,
+    });
+    return false;
+  }
+}
+
 function registerPasteLastShortcut() {
   unregisterPasteLastShortcut();
 
@@ -2403,6 +2606,10 @@ function bootAudioController() {
 }
 
 function bootDictationService() {
+  if (serviceProcess && !serviceProcess.killed) {
+    return;
+  }
+
   const launchSpec = getWorkerLaunchSpec('dictation_service');
   const localToken = ++serviceToken;
   const localProcess = spawn(launchSpec.command, launchSpec.args, {
@@ -2414,6 +2621,7 @@ function bootDictationService() {
 
   configureTextPipes(localProcess);
   serviceProcess = localProcess;
+  trackChildProcess('dictation_service', localProcess);
   setOverlayAudioLevel(0);
   setState({
     phase: 'booting',
@@ -2493,6 +2701,7 @@ function bootDictationService() {
       return;
     }
 
+    untrackChildProcess('dictation_service', localProcess.pid);
     serviceProcess = null;
     setOverlayAudioLevel(0);
     releaseCaptureMute(true);
@@ -2511,6 +2720,15 @@ function bootDictationService() {
 }
 
 function bootHotkeyListener() {
+  if (process.platform === 'darwin') {
+    registerMainShortcut();
+    return;
+  }
+
+  if (hotkeyProcess && !hotkeyProcess.killed) {
+    return;
+  }
+
   const launchSpec = getWorkerLaunchSpec('hotkey_listener');
   const localToken = ++hotkeyToken;
   const localProcess = spawn(launchSpec.command, launchSpec.args, {
@@ -2522,6 +2740,7 @@ function bootHotkeyListener() {
 
   configureTextPipes(localProcess);
   hotkeyProcess = localProcess;
+  trackChildProcess('hotkey_listener', localProcess);
   hotkeyReader = attachJsonReader(
     localProcess,
     (event) => {
@@ -2571,6 +2790,7 @@ function bootHotkeyListener() {
       return;
     }
 
+    untrackChildProcess('hotkey_listener', localProcess.pid);
     hotkeyProcess = null;
     setState({
       hotkeyOnline: false,
@@ -2815,6 +3035,7 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID);
   ensureRuntimeDirectories();
+  cleanupTrackedChildProcesses();
 
   const persistedState = loadPersistentState();
   setState({
@@ -2860,6 +3081,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  unregisterMainShortcut();
   unregisterPasteLastShortcut();
   shutdownChildren();
 });
