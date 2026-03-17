@@ -247,7 +247,7 @@ def main() -> int:
             try:
                 command = json.loads(line)
             except json.JSONDecodeError:
-            listener.emit("error", {"message": "Listener received an invalid JSON command."})
+                listener.emit("error", {"message": "Listener received an invalid JSON command."})
                 continue
 
             if command.get("type") == "shutdown":

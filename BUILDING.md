@@ -2,6 +2,12 @@
 
 This project uses the same codebase for Windows and macOS packaging.
 
+## macOS status
+
+- macOS packaging is included in the repository and CI workflows.
+- It has not been fully validated on a real Mac.
+- The maintainer does not currently have access to macOS hardware, so the macOS path should be treated as unverified/best effort until someone tests it on-device.
+
 ## How the packaged app works
 
 - The desktop UI runs in Electron.
@@ -42,6 +48,29 @@ If `FLOW_HOTKEY` is empty, OpenFlow uses the platform default automatically.
 - Node.js 20+
 - npm
 - Python 3.12
+
+## Environment setup
+
+Copy [`.env.example`](./.env.example) to `.env` before running the app locally.
+
+Suggested baseline:
+
+```env
+WHISPER_MODEL=small
+WHISPER_DEVICE=auto
+WHISPER_COMPUTE_TYPE=
+FLOW_HOTKEY=
+FLOW_PASTE_LAST_HOTKEY=
+ALLOWED_LANGUAGES=en
+INTERFACE_LANGUAGE=en
+```
+
+Notes:
+
+- Leave `WHISPER_COMPUTE_TYPE` empty unless you explicitly want to force a value.
+- Leave `FLOW_HOTKEY` and `FLOW_PASTE_LAST_HOTKEY` empty to use platform defaults.
+- `ALLOWED_LANGUAGES` accepts comma-separated ISO codes such as `en` or `en,pt`.
+- `WHISPER_MODEL_DIR` and `PYTHON_BIN` are optional advanced overrides.
 
 Recommended on Windows:
 
